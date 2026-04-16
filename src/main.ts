@@ -36,8 +36,8 @@ type OverlayTerritory = {
 
 type CachedPayload = {
   updatedAt: string;
-  territoryRaw: Record<string, TerritoryData>;
-  locationRaw: LocationData[] | { locations: LocationData[] };
+  territoryRaw: unknown;
+  locationRaw: unknown;
 };
 
 const MAP_IMAGE_URL = "./TopographicMap.png";
@@ -55,11 +55,11 @@ const EMPTY_CACHE_PAYLOAD: CachedPayload = {
   locationRaw: [],
 };
 
-const WORLD_BOUNDS_FALLBACK = {
+const MAP_WORLD_BOUNDS = {
   minX: -2200,
   maxX: 2200,
-  minZ: -2400,
-  maxZ: 2400,
+  minZ: -5600,
+  maxZ: 2200,
 };
 
 const colorCache = new Map<string, string>();
@@ -88,7 +88,7 @@ let dragStartY = 0;
 
 let territories: OverlayTerritory[] = [];
 let locations: OverlayPoint[] = [];
-let bounds = { ...WORLD_BOUNDS_FALLBACK };
+let bounds = { ...MAP_WORLD_BOUNDS };
 let hoveredLabel = "";
 
 function setStatus(message: string): void {
@@ -142,11 +142,104 @@ function setStoredCache(payload: CachedPayload): void {
   localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(payload));
 }
 
-function applyRawData(
-  territoryRaw: Record<string, TerritoryData>,
-  locationRaw: LocationData[] | { locations: LocationData[] },
-): void {
-  territories = Object.entries(territoryRaw).map(([name, value]) => ({
+function normalizeTerritories(territoryRaw: unknown): Record<string, TerritoryData> {
+  if (!territoryRaw || typeof territoryRaw !== "object") {
+    return {};
+  }
+
+  const rawObj = territoryRaw as Record<string, unknown>;
+  const territoriesContainer =
+    (typeof rawObj.territories === "object" && rawObj.territories) ||
+    (typeof rawObj.results === "object" && rawObj.results) ||
+    rawObj;
+
+  const entries = Object.entries(territoriesContainer as Record<string, unknown>).filter(([, value]) => {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const location = (value as TerritoryData).location;
+    return Array.isArray(location?.start) && Array.isArray(location?.end);
+  });
+
+  return Object.fromEntries(entries) as Record<string, TerritoryData>;
+}
+
+function normalizeLocations(locationRaw: unknown): LocationData[] {
+  const collected: LocationData[] = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (name: string, icon: string, x: unknown, z: unknown): void => {
+    const parsedX = Number(x);
+    const parsedZ = Number(z);
+    if (!Number.isFinite(parsedX) || !Number.isFinite(parsedZ)) {
+      return;
+    }
+    const key = `${name}|${parsedX}|${parsedZ}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    collected.push({ name, icon, x: parsedX, z: parsedZ });
+  };
+
+  const visit = (value: unknown, fallbackName: string): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item, fallbackName);
+      }
+      return;
+    }
+
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    const obj = value as Record<string, unknown>;
+    const name = typeof obj.name === "string" ? obj.name : fallbackName;
+    const icon = typeof obj.icon === "string" ? obj.icon : "marker";
+
+    if (Array.isArray(obj.coords) && obj.coords.length >= 2) {
+      pushCandidate(name, icon, obj.coords[0], obj.coords[1]);
+    }
+    if ("x" in obj && ("z" in obj || "y" in obj)) {
+      pushCandidate(name, icon, obj.x, obj.z ?? obj.y);
+    }
+
+    for (const [key, nested] of Object.entries(obj)) {
+      if (key === "name" || key === "icon" || key === "x" || key === "z" || key === "y" || key === "coords") {
+        continue;
+      }
+      visit(nested, key);
+    }
+  };
+
+  if (Array.isArray(locationRaw)) {
+    visit(locationRaw, "Location");
+    return collected;
+  }
+
+  if (!locationRaw || typeof locationRaw !== "object") {
+    return [];
+  }
+
+  const rawObj = locationRaw as Record<string, unknown>;
+  if (Array.isArray(rawObj.locations)) {
+    visit(rawObj.locations, "Location");
+    return collected;
+  }
+
+  if (rawObj.locations && typeof rawObj.locations === "object") {
+    visit(rawObj.locations, "Location");
+    return collected;
+  }
+
+  visit(rawObj, "Location");
+  return collected;
+}
+
+function applyRawData(territoryRaw: unknown, locationRaw: unknown): void {
+  const normalizedTerritories = normalizeTerritories(territoryRaw);
+  territories = Object.entries(normalizedTerritories).map(([name, value]) => ({
     name,
     guildName: value.guild?.name ?? "Unknown guild",
     guildPrefix: value.guild?.prefix ?? "",
@@ -155,11 +248,7 @@ function applyRawData(
     end: { x: value.location.end[0], z: value.location.end[1] },
   }));
 
-  const locationsArr = Array.isArray(locationRaw)
-    ? locationRaw
-    : Array.isArray(locationRaw.locations)
-      ? locationRaw.locations
-      : [];
+  const locationsArr = normalizeLocations(locationRaw);
 
   locations = locationsArr
     .filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.z))
@@ -189,30 +278,7 @@ function formatDateTime(isoDate: string): string {
 }
 
 function updateWorldBounds(): void {
-  const xs: number[] = [];
-  const zs: number[] = [];
-
-  for (const territory of territories) {
-    xs.push(territory.start.x, territory.end.x);
-    zs.push(territory.start.z, territory.end.z);
-  }
-
-  for (const location of locations) {
-    xs.push(location.world.x);
-    zs.push(location.world.z);
-  }
-
-  if (xs.length > 0 && zs.length > 0) {
-    const padding = 60;
-    bounds = {
-      minX: Math.min(...xs) - padding,
-      maxX: Math.max(...xs) + padding,
-      minZ: Math.min(...zs) - padding,
-      maxZ: Math.max(...zs) + padding,
-    };
-  } else {
-    bounds = { ...WORLD_BOUNDS_FALLBACK };
-  }
+  bounds = { ...MAP_WORLD_BOUNDS };
 }
 
 function worldToImage(point: Vec2): { x: number; y: number } {
@@ -221,7 +287,7 @@ function worldToImage(point: Vec2): { x: number; y: number } {
 
   return {
     x: xRatio * mapImage.width,
-    y: (1 - zRatio) * mapImage.height,
+    y: zRatio * mapImage.height,
   };
 }
 
@@ -312,7 +378,7 @@ function drawTerritories(): void {
       ctx.fillStyle = "#f9f9f9";
       ctx.font = `${Math.max(10, Math.min(16, scale * 1.1))}px sans-serif`;
       ctx.fillText(
-        territory.guildPrefix || territory.guildName,
+        territory.name,
         screen.x + 4,
         screen.y + Math.max(12, Math.min(16, screenHeight - 4)),
       );
@@ -389,7 +455,7 @@ function screenToWorld(screenX: number, screenY: number): Vec2 {
   const imageY = (screenY - offsetY) / scale;
 
   const x = bounds.minX + (imageX / mapImage.width) * (bounds.maxX - bounds.minX);
-  const z = bounds.maxZ - (imageY / mapImage.height) * (bounds.maxZ - bounds.minZ);
+  const z = bounds.minZ + (imageY / mapImage.height) * (bounds.maxZ - bounds.minZ);
   return { x, z };
 }
 
