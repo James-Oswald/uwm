@@ -14,8 +14,8 @@ const EMPTY_CACHE_PAYLOAD = {
 const MAP_WORLD_BOUNDS = {
     minX: -2200,
     maxX: 2200,
-    minZ: -2400,
-    maxZ: 2400,
+    minZ: -5600,
+    maxZ: 2200,
 };
 const colorCache = new Map();
 const canvas = document.querySelector("#map-canvas");
@@ -107,33 +107,65 @@ function normalizeTerritories(territoryRaw) {
     return Object.fromEntries(entries);
 }
 function normalizeLocations(locationRaw) {
+    const collected = [];
+    const seen = new Set();
+    const pushCandidate = (name, icon, x, z) => {
+        const parsedX = Number(x);
+        const parsedZ = Number(z);
+        if (!Number.isFinite(parsedX) || !Number.isFinite(parsedZ)) {
+            return;
+        }
+        const key = `${name}|${parsedX}|${parsedZ}`;
+        if (seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+        collected.push({ name, icon, x: parsedX, z: parsedZ });
+    };
+    const visit = (value, fallbackName) => {
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                visit(item, fallbackName);
+            }
+            return;
+        }
+        if (!value || typeof value !== "object") {
+            return;
+        }
+        const obj = value;
+        const name = typeof obj.name === "string" ? obj.name : fallbackName;
+        const icon = typeof obj.icon === "string" ? obj.icon : "marker";
+        if (Array.isArray(obj.coords) && obj.coords.length >= 2) {
+            pushCandidate(name, icon, obj.coords[0], obj.coords[1]);
+        }
+        if ("x" in obj && ("z" in obj || "y" in obj)) {
+            pushCandidate(name, icon, obj.x, obj.z ?? obj.y);
+        }
+        for (const [key, nested] of Object.entries(obj)) {
+            if (key === "name" || key === "icon" || key === "x" || key === "z" || key === "y" || key === "coords") {
+                continue;
+            }
+            visit(nested, key);
+        }
+    };
     if (Array.isArray(locationRaw)) {
-        return locationRaw;
+        visit(locationRaw, "Location");
+        return collected;
     }
     if (!locationRaw || typeof locationRaw !== "object") {
         return [];
     }
     const rawObj = locationRaw;
     if (Array.isArray(rawObj.locations)) {
-        return rawObj.locations;
+        visit(rawObj.locations, "Location");
+        return collected;
     }
     if (rawObj.locations && typeof rawObj.locations === "object") {
-        return Object.entries(rawObj.locations)
-            .map(([name, value]) => {
-            if (!value || typeof value !== "object") {
-                return null;
-            }
-            const entry = value;
-            return {
-                name: entry.name ?? name,
-                icon: entry.icon ?? "marker",
-                x: entry.x ?? Number.NaN,
-                z: entry.z ?? Number.NaN,
-            };
-        })
-            .filter((entry) => entry !== null);
+        visit(rawObj.locations, "Location");
+        return collected;
     }
-    return [];
+    visit(rawObj, "Location");
+    return collected;
 }
 function applyRawData(territoryRaw, locationRaw) {
     const normalizedTerritories = normalizeTerritories(territoryRaw);
