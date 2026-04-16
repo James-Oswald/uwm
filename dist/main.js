@@ -11,7 +11,7 @@ const EMPTY_CACHE_PAYLOAD = {
     territoryRaw: {},
     locationRaw: [],
 };
-const WORLD_BOUNDS_FALLBACK = {
+const MAP_WORLD_BOUNDS = {
     minX: -2200,
     maxX: 2200,
     minZ: -2400,
@@ -38,7 +38,7 @@ let dragStartX = 0;
 let dragStartY = 0;
 let territories = [];
 let locations = [];
-let bounds = { ...WORLD_BOUNDS_FALLBACK };
+let bounds = { ...MAP_WORLD_BOUNDS };
 let hoveredLabel = "";
 function setStatus(message) {
     statusEl.textContent = message;
@@ -89,8 +89,55 @@ function getStoredCache() {
 function setStoredCache(payload) {
     localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(payload));
 }
+function normalizeTerritories(territoryRaw) {
+    if (!territoryRaw || typeof territoryRaw !== "object") {
+        return {};
+    }
+    const rawObj = territoryRaw;
+    const territoriesContainer = (typeof rawObj.territories === "object" && rawObj.territories) ||
+        (typeof rawObj.results === "object" && rawObj.results) ||
+        rawObj;
+    const entries = Object.entries(territoriesContainer).filter(([, value]) => {
+        if (!value || typeof value !== "object") {
+            return false;
+        }
+        const location = value.location;
+        return Array.isArray(location?.start) && Array.isArray(location?.end);
+    });
+    return Object.fromEntries(entries);
+}
+function normalizeLocations(locationRaw) {
+    if (Array.isArray(locationRaw)) {
+        return locationRaw;
+    }
+    if (!locationRaw || typeof locationRaw !== "object") {
+        return [];
+    }
+    const rawObj = locationRaw;
+    if (Array.isArray(rawObj.locations)) {
+        return rawObj.locations;
+    }
+    if (rawObj.locations && typeof rawObj.locations === "object") {
+        return Object.entries(rawObj.locations)
+            .map(([name, value]) => {
+            if (!value || typeof value !== "object") {
+                return null;
+            }
+            const entry = value;
+            return {
+                name: entry.name ?? name,
+                icon: entry.icon ?? "marker",
+                x: entry.x ?? Number.NaN,
+                z: entry.z ?? Number.NaN,
+            };
+        })
+            .filter((entry) => entry !== null);
+    }
+    return [];
+}
 function applyRawData(territoryRaw, locationRaw) {
-    territories = Object.entries(territoryRaw).map(([name, value]) => ({
+    const normalizedTerritories = normalizeTerritories(territoryRaw);
+    territories = Object.entries(normalizedTerritories).map(([name, value]) => ({
         name,
         guildName: value.guild?.name ?? "Unknown guild",
         guildPrefix: value.guild?.prefix ?? "",
@@ -98,11 +145,7 @@ function applyRawData(territoryRaw, locationRaw) {
         start: { x: value.location.start[0], z: value.location.start[1] },
         end: { x: value.location.end[0], z: value.location.end[1] },
     }));
-    const locationsArr = Array.isArray(locationRaw)
-        ? locationRaw
-        : Array.isArray(locationRaw.locations)
-            ? locationRaw.locations
-            : [];
+    const locationsArr = normalizeLocations(locationRaw);
     locations = locationsArr
         .filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.z))
         .map((entry) => ({
@@ -127,35 +170,14 @@ function formatDateTime(isoDate) {
     return parsed.toLocaleString();
 }
 function updateWorldBounds() {
-    const xs = [];
-    const zs = [];
-    for (const territory of territories) {
-        xs.push(territory.start.x, territory.end.x);
-        zs.push(territory.start.z, territory.end.z);
-    }
-    for (const location of locations) {
-        xs.push(location.world.x);
-        zs.push(location.world.z);
-    }
-    if (xs.length > 0 && zs.length > 0) {
-        const padding = 60;
-        bounds = {
-            minX: Math.min(...xs) - padding,
-            maxX: Math.max(...xs) + padding,
-            minZ: Math.min(...zs) - padding,
-            maxZ: Math.max(...zs) + padding,
-        };
-    }
-    else {
-        bounds = { ...WORLD_BOUNDS_FALLBACK };
-    }
+    bounds = { ...MAP_WORLD_BOUNDS };
 }
 function worldToImage(point) {
     const xRatio = (point.x - bounds.minX) / (bounds.maxX - bounds.minX);
     const zRatio = (point.z - bounds.minZ) / (bounds.maxZ - bounds.minZ);
     return {
         x: xRatio * mapImage.width,
-        y: (1 - zRatio) * mapImage.height,
+        y: zRatio * mapImage.height,
     };
 }
 function imageToScreen(point) {
@@ -230,7 +252,7 @@ function drawTerritories() {
             ctx.globalAlpha = 1;
             ctx.fillStyle = "#f9f9f9";
             ctx.font = `${Math.max(10, Math.min(16, scale * 1.1))}px sans-serif`;
-            ctx.fillText(territory.guildPrefix || territory.guildName, screen.x + 4, screen.y + Math.max(12, Math.min(16, screenHeight - 4)));
+            ctx.fillText(territory.name, screen.x + 4, screen.y + Math.max(12, Math.min(16, screenHeight - 4)));
         }
     }
     ctx.globalAlpha = 1;
@@ -291,7 +313,7 @@ function screenToWorld(screenX, screenY) {
     const imageX = (screenX - offsetX) / scale;
     const imageY = (screenY - offsetY) / scale;
     const x = bounds.minX + (imageX / mapImage.width) * (bounds.maxX - bounds.minX);
-    const z = bounds.maxZ - (imageY / mapImage.height) * (bounds.maxZ - bounds.minZ);
+    const z = bounds.minZ + (imageY / mapImage.height) * (bounds.maxZ - bounds.minZ);
     return { x, z };
 }
 function updateHover(clientX, clientY) {
