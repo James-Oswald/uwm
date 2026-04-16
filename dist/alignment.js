@@ -34,3 +34,30 @@ export function zoomAt(screenPoint, view, nextScale) {
         offsetY: screenPoint.y - imagePoint.y * nextScale,
     };
 }
+export function expandBoundsToFitData(fallback, points, padding = 32) {
+    if (points.length === 0) {
+        return fallback;
+    }
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    for (const point of points) {
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.z)) {
+            continue;
+        }
+        minX = Math.min(minX, point.x);
+        maxX = Math.max(maxX, point.x);
+        minZ = Math.min(minZ, point.z);
+        maxZ = Math.max(maxZ, point.z);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minZ) || !Number.isFinite(maxZ)) {
+        return fallback;
+    }
+    return {
+        minX: Math.min(fallback.minX, minX - padding),
+        maxX: Math.max(fallback.maxX, maxX + padding),
+        minZ: Math.min(fallback.minZ, minZ - padding),
+        maxZ: Math.max(fallback.maxZ, maxZ + padding),
+    };
+}

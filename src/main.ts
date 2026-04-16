@@ -1,4 +1,4 @@
-import { imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
+import { expandBoundsToFitData, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
 import type { Vec2 } from "./alignment.js";
 
 type TerritoryData = {
@@ -310,8 +310,18 @@ function formatDateTime(isoDate: string): string {
 }
 
 function updateWorldBounds(): void {
-  bounds = { ...MAP_WORLD_BOUNDS };
+  const points: Vec2[] = [];
+
+  for (const territory of territories) {
+    points.push(territory.start, territory.end);
+  }
+  for (const location of locations) {
+    points.push(location.world);
+  }
+
+  bounds = expandBoundsToFitData(MAP_WORLD_BOUNDS, points);
 }
+
 
 function getScaleToFitViewport(): number {
   if (!mapImage.width || !mapImage.height) {
@@ -513,17 +523,25 @@ async function refreshCache(): Promise<void> {
 }
 
 canvas.addEventListener("pointerdown", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+
   isDragging = true;
-  dragStartX = event.clientX - offsetX;
-  dragStartY = event.clientY - offsetY;
+  dragStartX = x - offsetX;
+  dragStartY = y - offsetY;
   canvas.classList.add("dragging");
   canvas.setPointerCapture(event.pointerId);
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+
   if (isDragging) {
-    offsetX = event.clientX - dragStartX;
-    offsetY = event.clientY - dragStartY;
+    offsetX = x - dragStartX;
+    offsetY = y - dragStartY;
     draw();
   } else {
     updateHover(event.clientX, event.clientY);

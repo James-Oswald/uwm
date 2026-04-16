@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt } from '../dist/alignment.js';
+import { expandBoundsToFitData, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt } from '../dist/alignment.js';
 
 const bounds = {
   minX: -2200,
@@ -72,4 +72,33 @@ test('world stays aligned to same screen point after zoom around that point', ()
   const screenAfter = imageToScreen(imagePoint, nextView);
   close(screenAfter.x, screenAnchor.x);
   close(screenAfter.y, screenAnchor.y);
+});
+
+
+test('expandBoundsToFitData expands fallback bounds when observed data exceeds defaults', () => {
+  const fallback = { minX: -2200, maxX: 2200, minZ: -5600, maxZ: 2200 };
+  const points = [
+    { x: -2600, z: -5800 },
+    { x: 2550, z: 2450 },
+  ];
+
+  const expanded = expandBoundsToFitData(fallback, points, 10);
+
+  assert.deepEqual(expanded, {
+    minX: -2610,
+    maxX: 2560,
+    minZ: -5810,
+    maxZ: 2460,
+  });
+});
+
+test('expandBoundsToFitData keeps fallback when points are already inside', () => {
+  const fallback = { minX: -2200, maxX: 2200, minZ: -5600, maxZ: 2200 };
+  const points = [
+    { x: -1500, z: -5300 },
+    { x: 1800, z: 1400 },
+  ];
+
+  const expanded = expandBoundsToFitData(fallback, points, 10);
+  assert.deepEqual(expanded, fallback);
 });

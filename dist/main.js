@@ -1,4 +1,4 @@
-import { imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
+import { expandBoundsToFitData, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
 const MAP_IMAGE_URL = "./TopographicMap.png";
 const BUNDLED_CACHE_URL = "./cache/wynn-data.json";
 const CACHE_STORAGE_KEY = "wynn-map-cached-data";
@@ -228,7 +228,14 @@ function formatDateTime(isoDate) {
     return parsed.toLocaleString();
 }
 function updateWorldBounds() {
-    bounds = { ...MAP_WORLD_BOUNDS };
+    const points = [];
+    for (const territory of territories) {
+        points.push(territory.start, territory.end);
+    }
+    for (const location of locations) {
+        points.push(location.world);
+    }
+    bounds = expandBoundsToFitData(MAP_WORLD_BOUNDS, points);
 }
 function getScaleToFitViewport() {
     if (!mapImage.width || !mapImage.height) {
@@ -392,16 +399,22 @@ async function refreshCache() {
     draw();
 }
 canvas.addEventListener("pointerdown", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
     isDragging = true;
-    dragStartX = event.clientX - offsetX;
-    dragStartY = event.clientY - offsetY;
+    dragStartX = x - offsetX;
+    dragStartY = y - offsetY;
     canvas.classList.add("dragging");
     canvas.setPointerCapture(event.pointerId);
 });
 canvas.addEventListener("pointermove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
     if (isDragging) {
-        offsetX = event.clientX - dragStartX;
-        offsetY = event.clientY - dragStartY;
+        offsetX = x - dragStartX;
+        offsetY = y - dragStartY;
         draw();
     }
     else {
