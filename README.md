@@ -5,7 +5,7 @@ A fully client-side TypeScript web app that:
 - renders `TopographicMap.png` on an HTML canvas,
 - supports drag-to-pan and wheel-to-zoom,
 - overlays guild territories and map locations,
-- prefers cached data and gracefully falls back when live API requests are blocked by CORS.
+- reads pre-generated cached data from `cache/wynn-data.json` (no frontend API calls).
 
 ## Run locally
 
@@ -18,11 +18,10 @@ Then open `http://localhost:4173`.
 
 ## Cache strategy (no backend required)
 
-Because this project is client-only, it now reads from `cache/wynn-data.json` first, then:
+The browser only uses cached payloads:
 
-1. Uses localStorage cache if present.
-2. Attempts a live refresh only when cache is older than 7 days (or when you click **Refresh cache**).
-3. Falls back to cached data if live refresh fails (CORS/404/network).
+1. Reads `cache/wynn-data.json`.
+2. Reuses localStorage cache when it is newer than the bundled cache.
 
 ## Refresh cache data from Node (recommended weekly)
 
