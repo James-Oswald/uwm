@@ -31,6 +31,12 @@ body {
   gap: 1rem;
 }
 
+.mobile-menu-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .topbar h1 {
   margin: 0 0 0.5rem;
   font-size: 1.2rem;
@@ -46,10 +52,6 @@ body {
   gap: 1rem;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.quest-toolbar {
-  margin-top: 0.65rem;
 }
 
 .controls label,
@@ -79,20 +81,24 @@ body {
 }
 
 .quest-select-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.65rem;
-  min-width: min(100%, 24rem);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .quest-select-label {
   color: #c9d7e4;
   font-weight: 600;
-  white-space: nowrap;
 }
 
 .select-control select {
-  min-width: 14rem;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid #38485a;
   border-radius: 0.35rem;
   background: #0f151c;
@@ -159,7 +165,7 @@ body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 19rem minmax(0, 1fr);
+  grid-template-columns: 19rem minmax(0, 1fr) 22rem;
   overflow: hidden;
 }
 
@@ -169,6 +175,11 @@ body {
   background: #0f151c;
   padding: 0.9rem 0.85rem;
   overflow-y: auto;
+}
+
+.side-menu-right {
+  border-right: none;
+  border-left: 1px solid #29333f;
 }
 
 .side-menu-header {
@@ -206,6 +217,86 @@ body {
   line-height: 1.35;
 }
 
+.quest-stage-panel {
+  margin-top: 0.9rem;
+}
+
+.quest-stage-summary {
+  margin: 0 0 0.7rem;
+  color: #cbd5e1;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.quest-stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.quest-stage-item {
+  margin: 0;
+}
+
+.quest-stage-button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.7rem;
+  align-items: start;
+  border: 1px solid #243241;
+  border-radius: 0.7rem;
+  background: #15202a;
+  color: inherit;
+  text-align: left;
+  padding: 0.7rem 0.75rem;
+  cursor: pointer;
+}
+
+.quest-stage-button:hover,
+.quest-stage-button:focus-visible,
+.quest-stage-button.is-hovered {
+  border-color: #8b5cf6;
+  background: #1b2437;
+  outline: none;
+}
+
+.quest-stage-index {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #8b5cf6;
+  color: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.quest-stage-meta {
+  min-width: 0;
+}
+
+.quest-stage-name {
+  display: block;
+  color: #eef2ff;
+  font-size: 0.89rem;
+  line-height: 1.25;
+}
+
+.quest-stage-coords {
+  display: block;
+  margin-top: 0.16rem;
+  color: #94a3b8;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .legend-list {
   display: flex;
   flex-direction: column;
@@ -230,6 +321,22 @@ body {
   background: #15212b;
 }
 
+.legend-group-single {
+  padding: 0.45rem;
+}
+
+.legend-group-single-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0.65rem;
+  background: #15212b;
+  border: 1px solid #243241;
+  border-radius: 0.65rem;
+  padding: 0.7rem 0.75rem;
+  cursor: pointer;
+}
+
 .legend-group-toggle {
   margin: 0;
   flex: 0 0 auto;
@@ -248,6 +355,105 @@ body {
 
 .legend-group[open] .legend-group-summary::before {
   transform: rotate(90deg);
+}
+
+.legend-group-preview {
+  width: 2.3rem;
+  height: 2.3rem;
+  flex: 0 0 2.3rem;
+  position: relative;
+  overflow: visible;
+}
+
+.legend-group-preview-item {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.92rem;
+  height: 0.92rem;
+  transform: translate(-50%, -50%);
+  font-size: 0.54rem;
+  line-height: 1;
+}
+
+.legend-group-preview.count-1 .legend-group-preview-item {
+  width: 1.35rem;
+  height: 1.35rem;
+  font-size: 0.9rem;
+}
+
+.legend-group-preview.count-2 .preview-index-0 {
+  top: 29%;
+  width: 0.86rem;
+  height: 0.86rem;
+}
+
+.legend-group-preview.count-2 .preview-index-1 {
+  top: 71%;
+  width: 0.86rem;
+  height: 0.86rem;
+}
+
+.legend-group-preview.count-3 .preview-index-0 {
+  top: 25%;
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
+.legend-group-preview.count-3 .preview-index-1 {
+  left: 28%;
+  top: 74%;
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
+.legend-group-preview.count-3 .preview-index-2 {
+  left: 72%;
+  top: 74%;
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
+.legend-group-preview.count-4 .preview-index-0 {
+  left: 29%;
+  top: 29%;
+  width: 0.74rem;
+  height: 0.74rem;
+}
+
+.legend-group-preview.count-4 .preview-index-1 {
+  left: 71%;
+  top: 29%;
+  width: 0.74rem;
+  height: 0.74rem;
+}
+
+.legend-group-preview.count-4 .preview-index-2 {
+  left: 29%;
+  top: 71%;
+  width: 0.74rem;
+  height: 0.74rem;
+}
+
+.legend-group-preview.count-4 .preview-index-3 {
+  left: 71%;
+  top: 71%;
+  width: 0.74rem;
+  height: 0.74rem;
+}
+
+.legend-group-preview.count-2 .legend-group-preview-item,
+.legend-group-preview.count-3 .legend-group-preview-item,
+.legend-group-preview.count-4 .legend-group-preview-item {
+  font-size: 0.5rem;
+}
+
+.legend-group-preview .legend-symbol.shape-diamond {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.legend-group-preview .legend-symbol.shape-diamond span {
+  transform: rotate(-45deg);
 }
 
 .legend-group-meta {
@@ -421,7 +627,19 @@ body {
     transition: transform 0.22s ease;
   }
 
-  body.mobile-menu-open .side-menu {
+  .side-menu-right {
+    left: auto;
+    right: 0;
+    border-right: none;
+    border-left: 1px solid #29333f;
+    transform: translateX(calc(100% + 1.5rem));
+  }
+
+  body.mobile-marker-menu-open #side-menu {
+    transform: translateX(0);
+  }
+
+  body.mobile-quest-menu-open #quest-menu {
     transform: translateX(0);
   }
 

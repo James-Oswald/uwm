@@ -2,6 +2,7 @@ import { imageToScreen, screenToImage, zoomAt as zoomAtPoint } from "./alignment
 const MAP_IMAGE_URL = "./TopographicMap.png";
 const BUNDLED_CACHE_URL = "./cache/wynn-data.json";
 const CACHE_STORAGE_KEY = "wynn-map-cached-data";
+const WIKI_ORIGIN = "https://wynncraft.wiki.gg";
 const EMPTY_CACHE_PAYLOAD = {
     updatedAt: new Date(0).toISOString(),
     territoryRaw: {},
@@ -41,12 +42,18 @@ const locationLabelsToggle = document.querySelector("#toggle-location-labels");
 const locationIconSizeInput = document.querySelector("#location-icon-size");
 const locationIconSizeValue = document.querySelector("#location-icon-size-value");
 const questSelect = document.querySelector("#quest-select");
+const questStageSummary = document.querySelector("#quest-stage-summary");
+const questStageList = document.querySelector("#quest-stage-list");
 const markerLegend = document.querySelector("#marker-legend");
 const legendToggleAllBtn = document.querySelector("#legend-toggle-all");
-const mobileMenuToggleBtn = document.querySelector("#mobile-menu-toggle");
+const clearQuestSelectionBtn = document.querySelector("#clear-quest-selection");
+const mobileMarkerMenuToggleBtn = document.querySelector("#mobile-marker-menu-toggle");
+const mobileQuestMenuToggleBtn = document.querySelector("#mobile-quest-menu-toggle");
 const mobileMenuCloseBtn = document.querySelector("#mobile-menu-close");
+const mobileQuestMenuCloseBtn = document.querySelector("#mobile-quest-menu-close");
 const mobileMenuBackdrop = document.querySelector("#mobile-menu-backdrop");
 const sideMenu = document.querySelector("#side-menu");
+const questMenu = document.querySelector("#quest-menu");
 const mouseWorldCoordsEl = document.querySelector("#mouse-world-coords");
 const mouseImageCoordsEl = document.querySelector("#mouse-image-coords");
 const resetBtn = document.querySelector("#reset-view");
@@ -63,9 +70,12 @@ let offsetY = 0;
 let isDragging = false;
 let dragStartX = 0;
 let dragStartY = 0;
+let dragMoved = false;
 let territories = [];
-let locations = [];
-let paths = [];
+let markerLocations = [];
+let markerPaths = [];
+let questLocationById = new Map();
+let questPathByKey = new Map();
 let bounds = { ...MAP_WORLD_BOUNDS };
 let hoveredLabel = "";
 let viewportWidth = 0;
@@ -78,8 +88,11 @@ const enabledMarkerTypes = new Set();
 let hasInitializedMarkerTypes = false;
 let questOptions = [];
 let selectedQuestKey = "";
+let hoveredQuestPointId = "";
 let baseStatusMessage = "Loading map data...";
-let isMobileMenuOpen = false;
+let activeOverlayMode = "marker";
+let openMobileMenu = null;
+let questStartsEnabled = true;
 const mobileMenuMediaQuery = window.matchMedia("(max-width: 980px)");
 const MARKER_TYPE_ORDER = [
     "quest",
@@ -460,9 +473,159 @@ function drawMarkerGlyph(screenX, screenY, size, visual) {
 function isMarkerTypeEnabled(typeKey) {
     return enabledMarkerTypes.has(typeKey);
 }
+function getSelectedQuest() {
+    if (!selectedQuestKey) {
+        return null;
+    }
+    return questOptions.find((quest) => quest.key === selectedQuestKey) ?? null;
+}
+function getActiveQuestLocations() {
+    const selectedQuest = getSelectedQuest();
+    if (!selectedQuest) {
+        return [];
+    }
+    return selectedQuest.pointIds
+        .map((pointId) => questLocationById.get(pointId))
+        .filter((location) => Boolean(location))
+        .filter((location) => shouldShowOutOfBoundsMarkers() || isPointWithinMapBounds(location.world));
+}
+function getActiveQuestPath() {
+    const selectedQuest = getSelectedQuest();
+    if (!selectedQuest) {
+        return null;
+    }
+    return questPathByKey.get(selectedQuest.key) ?? null;
+}
+function getQuestStartLocation(quest) {
+    if (!quest.startPointId) {
+        return null;
+    }
+    const location = questLocationById.get(quest.startPointId) ?? null;
+    if (!location) {
+        return null;
+    }
+    if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
+        return null;
+    }
+    return location;
+}
+function getVisibleQuestStarts() {
+    if (!questStartsEnabled) {
+        return [];
+    }
+    return questOptions
+        .map((quest) => {
+        const location = getQuestStartLocation(quest);
+        return location ? { quest, location } : null;
+    })
+        .filter((entry) => Boolean(entry));
+}
+function buildQuestWikiUrl(questTitle, sectionTitle) {
+    const normalizedPageTitle = questTitle.replace(/ /g, "_");
+    const pageUrl = `${WIKI_ORIGIN}/wiki/${encodeURIComponent(normalizedPageTitle)}`;
+    if (!sectionTitle) {
+        return pageUrl;
+    }
+    const normalizedSectionTitle = sectionTitle.replace(/ /g, "_");
+    return `${pageUrl}#${encodeURIComponent(normalizedSectionTitle)}`;
+}
+function getQuestStageSectionTitle(location) {
+    const selectedQuest = getSelectedQuest();
+    if (!selectedQuest) {
+        return null;
+    }
+    const prefix = `${selectedQuest.label} - `;
+    if (location.name.startsWith(prefix)) {
+        return location.name.slice(prefix.length).trim() || null;
+    }
+    return location.name.trim() || null;
+}
+function openQuestStageWiki(location) {
+    const selectedQuest = getSelectedQuest();
+    if (!selectedQuest) {
+        return;
+    }
+    const sectionTitle = getQuestStageSectionTitle(location);
+    const wikiUrl = buildQuestWikiUrl(selectedQuest.label, sectionTitle ?? undefined);
+    window.open(wikiUrl, "_blank", "noopener,noreferrer");
+}
+function getVisibleQuestPathPoints() {
+    const activeQuestPath = getActiveQuestPath();
+    if (!activeQuestPath) {
+        return [];
+    }
+    return activeQuestPath.points.filter((point) => shouldShowOutOfBoundsMarkers() || isPointWithinMapBounds(point));
+}
+function clearQuestStageHover() {
+    if (!hoveredQuestPointId) {
+        return;
+    }
+    hoveredQuestPointId = "";
+    draw();
+}
+function setHoveredQuestPoint(pointId) {
+    if (hoveredQuestPointId === pointId) {
+        return;
+    }
+    hoveredQuestPointId = pointId;
+    draw();
+}
+function focusQuestOnMap() {
+    const questLocations = getActiveQuestLocations();
+    const questPathPoints = getVisibleQuestPathPoints();
+    const pointsToFit = [...questLocations.map((location) => location.world), ...questPathPoints];
+    if (pointsToFit.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+        return;
+    }
+    const imagePoints = pointsToFit.map((point) => worldToMapImage(point));
+    let left = Math.min(...imagePoints.map((point) => point.x));
+    let right = Math.max(...imagePoints.map((point) => point.x));
+    let top = Math.min(...imagePoints.map((point) => point.y));
+    let bottom = Math.max(...imagePoints.map((point) => point.y));
+    if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
+        return;
+    }
+    const minSpan = 140;
+    if (right - left < minSpan) {
+        const delta = (minSpan - (right - left)) / 2;
+        left -= delta;
+        right += delta;
+    }
+    if (bottom - top < minSpan) {
+        const delta = (minSpan - (bottom - top)) / 2;
+        top -= delta;
+        bottom += delta;
+    }
+    const padding = Math.max(64, Math.min(viewportWidth, viewportHeight) * 0.12);
+    left -= padding;
+    right += padding;
+    top -= padding;
+    bottom += padding;
+    const width = Math.max(1, right - left);
+    const height = Math.max(1, bottom - top);
+    const availableWidth = Math.max(120, viewportWidth);
+    const availableHeight = Math.max(120, viewportHeight);
+    const nextScale = Math.max(minScale, Math.min(maxScale, Math.min(availableWidth / width, availableHeight / height)));
+    scale = nextScale;
+    offsetX = (viewportWidth - width * scale) / 2 - left * scale;
+    offsetY = (viewportHeight - height * scale) / 2 - top * scale;
+    draw();
+}
+function setActiveOverlayMode(nextMode) {
+    if (activeOverlayMode === nextMode) {
+        return;
+    }
+    activeOverlayMode = nextMode;
+    if (nextMode !== "quest") {
+        hoveredQuestPointId = "";
+    }
+    updateStatus();
+    hoveredLabel = "";
+    draw();
+}
 function buildLegend() {
     const counts = new Map();
-    for (const location of locations) {
+    for (const location of markerLocations) {
         if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
             continue;
         }
@@ -475,6 +638,21 @@ function buildLegend() {
             counts.set(visual.key, { visual, count: 1 });
         }
     }
+    const visibleQuestStartCount = questOptions.reduce((count, quest) => count + (getQuestStartLocation(quest) ? 1 : 0), 0);
+    if (visibleQuestStartCount > 0) {
+        counts.set("quest", {
+            visual: classifyMarkerVisual({
+                id: "legend:quest-starts",
+                name: "Quest Start",
+                icon: "quest",
+                kind: "quest",
+                pageTitles: [],
+                sourceKinds: [],
+                world: { x: 0, z: 0 },
+            }),
+            count: visibleQuestStartCount,
+        });
+    }
     const entries = [...counts.values()].sort((a, b) => {
         const orderA = MARKER_TYPE_ORDER.indexOf(a.visual.key);
         const orderB = MARKER_TYPE_ORDER.indexOf(b.visual.key);
@@ -484,7 +662,9 @@ function buildLegend() {
     });
     if (!hasInitializedMarkerTypes) {
         for (const entry of entries) {
-            enabledMarkerTypes.add(entry.visual.key);
+            if (entry.visual.key !== "quest") {
+                enabledMarkerTypes.add(entry.visual.key);
+            }
         }
         hasInitializedMarkerTypes = true;
     }
@@ -507,32 +687,14 @@ function buildLegend() {
         return normalizedA - normalizedB;
     });
     for (const [groupKey, groupEntries] of orderedGroups) {
-        const details = document.createElement("details");
-        details.className = "legend-group";
-        details.open = true;
-        const summary = document.createElement("summary");
-        summary.className = "legend-group-summary";
         const groupToggle = document.createElement("input");
         groupToggle.type = "checkbox";
         groupToggle.className = "legend-group-toggle";
         groupToggle.addEventListener("click", (event) => {
             event.stopPropagation();
         });
-        const groupMeta = document.createElement("span");
-        groupMeta.className = "legend-group-meta";
-        const groupName = document.createElement("span");
-        groupName.className = "legend-group-name";
-        groupName.textContent = MARKER_GROUP_META[groupKey]?.label ?? groupKey;
-        const groupDescription = document.createElement("span");
-        groupDescription.className = "legend-group-desc";
-        groupDescription.textContent = MARKER_GROUP_META[groupKey]?.description ?? "";
-        groupMeta.append(groupName, groupDescription);
-        const groupCount = document.createElement("span");
-        groupCount.className = "legend-group-count";
-        groupCount.textContent = groupEntries.reduce((sum, entry) => sum + entry.count, 0).toLocaleString();
-        const groupList = document.createElement("div");
-        groupList.className = "legend-group-list";
         const itemCheckboxes = [];
+        const groupCountValue = groupEntries.reduce((sum, entry) => sum + entry.count, 0);
         const syncGroupToggle = () => {
             const checkedCount = itemCheckboxes.filter((checkbox) => checkbox.checked).length;
             groupToggle.checked = checkedCount > 0 && checkedCount === itemCheckboxes.length;
@@ -545,44 +707,44 @@ function buildLegend() {
                 if (!typeKey) {
                     continue;
                 }
-                if (groupToggle.checked) {
-                    enabledMarkerTypes.add(typeKey);
+                if (typeKey === "quest") {
+                    questStartsEnabled = groupToggle.checked;
                 }
                 else {
-                    enabledMarkerTypes.delete(typeKey);
+                    if (groupToggle.checked) {
+                        enabledMarkerTypes.add(typeKey);
+                    }
+                    else {
+                        enabledMarkerTypes.delete(typeKey);
+                    }
                 }
             }
             syncGroupToggle();
             draw();
         });
-        summary.append(groupToggle, groupMeta, groupCount);
-        details.append(summary);
-        for (const entry of groupEntries) {
-            const row = document.createElement("label");
-            row.className = "legend-item";
+        const rows = groupEntries.map((entry) => {
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
             checkbox.dataset.typeKey = entry.visual.key;
-            checkbox.checked = enabledMarkerTypes.has(entry.visual.key);
+            const isQuestStartEntry = entry.visual.key === "quest";
+            checkbox.checked = isQuestStartEntry ? questStartsEnabled : enabledMarkerTypes.has(entry.visual.key);
             checkbox.addEventListener("change", () => {
-                if (checkbox.checked) {
-                    enabledMarkerTypes.add(entry.visual.key);
+                if (isQuestStartEntry) {
+                    questStartsEnabled = checkbox.checked;
                 }
                 else {
-                    enabledMarkerTypes.delete(entry.visual.key);
+                    if (checkbox.checked) {
+                        enabledMarkerTypes.add(entry.visual.key);
+                    }
+                    else {
+                        enabledMarkerTypes.delete(entry.visual.key);
+                    }
                 }
                 syncGroupToggle();
                 draw();
             });
             itemCheckboxes.push(checkbox);
-            const symbol = document.createElement("span");
-            symbol.className = `legend-symbol shape-${entry.visual.shape}`;
-            symbol.style.background = entry.visual.fill;
-            symbol.style.border = `2px solid ${entry.visual.stroke}`;
-            symbol.style.color = entry.visual.stroke;
-            const symbolText = document.createElement("span");
-            symbolText.textContent = entry.visual.glyph;
-            symbol.append(symbolText);
+            const symbol = createLegendSymbol(entry.visual);
             const meta = document.createElement("span");
             meta.className = "legend-meta";
             const name = document.createElement("span");
@@ -595,22 +757,97 @@ function buildLegend() {
             const count = document.createElement("span");
             count.className = "legend-count";
             count.textContent = entry.count.toLocaleString();
+            const row = document.createElement("label");
+            row.className = "legend-item";
             row.append(checkbox, symbol, meta, count);
-            groupList.append(row);
+            return row;
+        });
+        if (groupEntries.length === 1) {
+            const [entry] = groupEntries;
+            groupToggle.dataset.typeKey = entry.visual.key;
+            const singleCard = document.createElement("div");
+            singleCard.className = "legend-group legend-group-single";
+            const singleRow = document.createElement("label");
+            singleRow.className = "legend-group-single-row";
+            const singleMeta = document.createElement("span");
+            singleMeta.className = "legend-group-meta";
+            const groupName = document.createElement("span");
+            groupName.className = "legend-group-name";
+            groupName.textContent = MARKER_GROUP_META[groupKey]?.label ?? groupKey;
+            const groupDescription = document.createElement("span");
+            groupDescription.className = "legend-group-desc";
+            groupDescription.textContent = entry.visual.label;
+            singleMeta.append(groupName, groupDescription);
+            const singleCount = document.createElement("span");
+            singleCount.className = "legend-group-count";
+            singleCount.textContent = groupCountValue.toLocaleString();
+            singleRow.append(groupToggle, createLegendSymbol(entry.visual), singleMeta, singleCount);
+            singleCard.append(singleRow);
+            markerLegend.append(singleCard);
+            syncGroupToggle();
+            continue;
         }
+        const details = document.createElement("details");
+        details.className = "legend-group";
+        details.open = false;
+        const summary = document.createElement("summary");
+        summary.className = "legend-group-summary";
+        const groupPreview = createLegendGroupPreview(groupEntries);
+        const groupMeta = document.createElement("span");
+        groupMeta.className = "legend-group-meta";
+        const groupName = document.createElement("span");
+        groupName.className = "legend-group-name";
+        groupName.textContent = MARKER_GROUP_META[groupKey]?.label ?? groupKey;
+        const groupDescription = document.createElement("span");
+        groupDescription.className = "legend-group-desc";
+        groupDescription.textContent = MARKER_GROUP_META[groupKey]?.description ?? "";
+        groupMeta.append(groupName, groupDescription);
+        const groupCount = document.createElement("span");
+        groupCount.className = "legend-group-count";
+        groupCount.textContent = groupCountValue.toLocaleString();
+        const groupList = document.createElement("div");
+        groupList.className = "legend-group-list";
+        summary.append(groupToggle, groupPreview, groupMeta, groupCount);
+        details.append(summary);
+        groupList.append(...rows);
         syncGroupToggle();
         details.append(groupList);
         markerLegend.append(details);
     }
 }
+function createLegendSymbol(visual, extraClassName = "") {
+    const symbol = document.createElement("span");
+    symbol.className = `legend-symbol shape-${visual.shape}${extraClassName ? ` ${extraClassName}` : ""}`;
+    symbol.style.background = visual.fill;
+    symbol.style.border = `2px solid ${visual.stroke}`;
+    symbol.style.color = visual.stroke;
+    const symbolText = document.createElement("span");
+    symbolText.textContent = visual.glyph;
+    symbol.append(symbolText);
+    return symbol;
+}
+function createLegendGroupPreview(groupEntries) {
+    const preview = document.createElement("span");
+    preview.className = `legend-group-preview count-${groupEntries.length}`;
+    preview.setAttribute("aria-hidden", "true");
+    groupEntries.slice(0, 4).forEach((entry, index) => {
+        const previewItem = createLegendSymbol(entry.visual, `legend-group-preview-item preview-index-${index}`);
+        preview.append(previewItem);
+    });
+    return preview;
+}
 function setStatus(message) {
     statusEl.textContent = message;
 }
 function updateStatus() {
-    const questMessage = selectedQuestKey
-        ? ` Showing all quest points for ${selectedQuestKey}.`
-        : questOptions.length > 0
-            ? " Showing the start point for every quest."
+    const questMessage = activeOverlayMode === "quest"
+        ? selectedQuestKey
+            ? ` Quest mode is active for ${selectedQuestKey}.`
+            : questOptions.length > 0
+                ? " Quest mode is ready. Select a quest from the right menu to load its markers."
+                : ""
+        : selectedQuestKey
+            ? ` Marker mode is active. Quest markers for ${selectedQuestKey} are hidden until you use the quest menu again.`
             : "";
     setStatus(`${baseStatusMessage}${questMessage}`);
 }
@@ -821,11 +1058,12 @@ function syncQuestSelectionControl() {
     const validQuestKeys = new Set(questOptions.map((quest) => quest.key));
     if (selectedQuestKey && !validQuestKeys.has(selectedQuestKey)) {
         selectedQuestKey = "";
+        hoveredQuestPointId = "";
     }
     questSelect.replaceChildren();
     const defaultOption = document.createElement("option");
     defaultOption.value = "";
-    defaultOption.textContent = "All quest starts";
+    defaultOption.textContent = "Select a quest";
     questSelect.append(defaultOption);
     for (const quest of questOptions) {
         const option = document.createElement("option");
@@ -835,24 +1073,91 @@ function syncQuestSelectionControl() {
     }
     questSelect.value = selectedQuestKey;
 }
+function buildQuestStageList() {
+    const selectedQuest = getSelectedQuest();
+    const activeQuestLocations = getActiveQuestLocations();
+    questStageList.replaceChildren();
+    if (!selectedQuest || activeQuestLocations.length === 0) {
+        questStageSummary.textContent = selectedQuest
+            ? "This quest does not currently have ordered stage markers to show."
+            : "Select a quest to view its stages.";
+        return;
+    }
+    questStageSummary.textContent = `${selectedQuest.label} has ${activeQuestLocations.length.toLocaleString()} numbered stages. Hover a stage to highlight it on the map.`;
+    activeQuestLocations.forEach((location, index) => {
+        const item = document.createElement("li");
+        item.className = "quest-stage-item";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "quest-stage-button";
+        button.dataset.pointId = location.id;
+        const indexBadge = document.createElement("span");
+        indexBadge.className = "quest-stage-index";
+        indexBadge.textContent = `${index + 1}`;
+        const meta = document.createElement("span");
+        meta.className = "quest-stage-meta";
+        const name = document.createElement("span");
+        name.className = "quest-stage-name";
+        name.textContent = location.name;
+        const coords = document.createElement("span");
+        coords.className = "quest-stage-coords";
+        coords.textContent = `x ${Math.round(location.world.x)}, z ${Math.round(location.world.z)}`;
+        meta.append(name, coords);
+        button.append(indexBadge, meta);
+        const syncHoverState = (isHovered) => {
+            button.classList.toggle("is-hovered", isHovered);
+        };
+        button.addEventListener("pointerenter", () => {
+            setHoveredQuestPoint(location.id);
+            syncHoverState(true);
+        });
+        button.addEventListener("pointerleave", () => {
+            clearQuestStageHover();
+            syncHoverState(false);
+        });
+        button.addEventListener("focus", () => {
+            setHoveredQuestPoint(location.id);
+            syncHoverState(true);
+        });
+        button.addEventListener("blur", () => {
+            clearQuestStageHover();
+            syncHoverState(false);
+        });
+        button.addEventListener("click", () => {
+            setActiveOverlayMode("quest");
+            setHoveredQuestPoint(location.id);
+            openQuestStageWiki(location);
+        });
+        item.append(button);
+        questStageList.append(item);
+    });
+}
+function revealQuestStartInLeftMenu(questKey) {
+    questStartsEnabled = true;
+    buildLegend();
+    setActiveOverlayMode("marker");
+    setMobileMenuOpen("markers");
+}
+function activateQuestFromStart(questKey) {
+    selectedQuestKey = questKey;
+    questSelect.value = questKey;
+    hoveredQuestPointId = "";
+    buildQuestStageList();
+    setActiveOverlayMode("quest");
+    focusQuestOnMap();
+    setMobileMenuOpen("quests");
+}
 function shouldRenderLocation(location) {
+    if (activeOverlayMode !== "marker") {
+        return false;
+    }
     if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
         return false;
     }
-    if (selectedQuestKey) {
-        const selectedQuest = questOptions.find((quest) => quest.key === selectedQuestKey);
-        return Boolean(selectedQuest && selectedQuest.pointIds.includes(location.id));
-    }
-    if (location.kind !== "quest") {
-        return true;
-    }
-    return questOptions.some((quest) => quest.startPointId === location.id);
+    return true;
 }
 function shouldRenderPath(path) {
-    if (!selectedQuestKey) {
-        return path.kind !== "quest-path";
-    }
-    return path.kind === "quest-path" && path.pageTitle === selectedQuestKey;
+    return activeOverlayMode === "marker" && path.kind !== "quest-path";
 }
 function applyRawData(territoryRaw, locationRaw, mapData) {
     const normalizedTerritories = normalizeTerritories(territoryRaw);
@@ -867,7 +1172,7 @@ function applyRawData(territoryRaw, locationRaw, mapData) {
     const normalizedMapData = normalizeMapData(mapData);
     if (normalizedMapData) {
         const pointById = new Map();
-        locations = normalizedMapData.points
+        const allPoints = normalizedMapData.points
             .filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.z))
             .map((entry) => {
             const point = {
@@ -882,7 +1187,7 @@ function applyRawData(territoryRaw, locationRaw, mapData) {
             pointById.set(point.id, point);
             return point;
         });
-        paths = normalizedMapData.paths
+        const allPaths = normalizedMapData.paths
             .map((path) => ({
             id: path.id,
             label: path.label,
@@ -894,10 +1199,17 @@ function applyRawData(territoryRaw, locationRaw, mapData) {
         }))
             .filter((path) => path.points.length >= 2);
         questOptions = buildQuestOptions(normalizedMapData);
+        const questPointIds = new Set(questOptions.flatMap((quest) => quest.pointIds));
+        markerLocations = allPoints.filter((point) => !questPointIds.has(point.id) && point.kind !== "quest");
+        questLocationById = new Map(allPoints.filter((point) => questPointIds.has(point.id)).map((point) => [point.id, point]));
+        markerPaths = allPaths.filter((path) => path.kind !== "quest-path");
+        questPathByKey = new Map(allPaths
+            .filter((path) => path.kind === "quest-path" && typeof path.pageTitle === "string")
+            .map((path) => [path.pageTitle, path]));
     }
     else {
         const locationsArr = normalizeLocations(locationRaw);
-        locations = locationsArr
+        markerLocations = locationsArr
             .filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.z))
             .map((entry, index) => ({
             id: `legacy:${index}:${entry.x}:${entry.z}`,
@@ -908,12 +1220,15 @@ function applyRawData(territoryRaw, locationRaw, mapData) {
             sourceKinds: ["official-marker"],
             world: { x: entry.x, z: entry.z },
         }));
-        paths = [];
+        markerPaths = [];
+        questLocationById = new Map();
+        questPathByKey = new Map();
         questOptions = [];
     }
     updateWorldBounds();
     buildLegend();
     syncQuestSelectionControl();
+    buildQuestStageList();
 }
 function formatDateTime(isoDate) {
     const parsed = new Date(isoDate);
@@ -996,16 +1311,38 @@ function drawTerritories() {
     ctx.globalAlpha = 1;
 }
 function drawPaths() {
-    if (!selectedQuestKey && !pathsToggle.checked) {
+    if (activeOverlayMode === "quest") {
+        const pointsToDraw = getVisibleQuestPathPoints();
+        if (pointsToDraw.length < 2) {
+            return;
+        }
+        ctx.beginPath();
+        for (const [index, point] of pointsToDraw.entries()) {
+            const image = worldToMapImage(point);
+            const screen = imageToScreen(image, { scale, offsetX, offsetY });
+            if (index === 0) {
+                ctx.moveTo(screen.x, screen.y);
+            }
+            else {
+                ctx.lineTo(screen.x, screen.y);
+            }
+        }
+        ctx.lineWidth = Math.max(1.5, scale * 0.55);
+        ctx.strokeStyle = "rgba(139, 92, 246, 0.72)";
+        ctx.setLineDash([]);
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.stroke();
         return;
     }
-    for (const path of paths) {
+    if (!pathsToggle.checked) {
+        return;
+    }
+    for (const path of markerPaths) {
         if (!shouldRenderPath(path)) {
             continue;
         }
-        const pointsToDraw = shouldShowOutOfBoundsMarkers()
-            ? path.points.filter((point) => isPointWithinMapBounds(point))
-            : path.points;
+        const pointsToDraw = path.points.filter((point) => shouldShowOutOfBoundsMarkers() || isPointWithinMapBounds(point));
         if (pointsToDraw.length < 2) {
             continue;
         }
@@ -1030,19 +1367,57 @@ function drawPaths() {
     ctx.setLineDash([]);
 }
 function drawLocations() {
-    if (!selectedQuestKey && !locationsToggle.checked) {
+    if (activeOverlayMode === "quest") {
+        const activeQuestLocations = getActiveQuestLocations();
+        if (activeQuestLocations.length === 0) {
+            return;
+        }
+        const iconSize = Math.max(8, Math.min(48, locationIconSize));
+        const halfIconSize = iconSize / 2;
+        for (const location of activeQuestLocations) {
+            if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
+                continue;
+            }
+            const image = worldToMapImage(location.world);
+            const screen = imageToScreen(image, { scale, offsetX, offsetY });
+            const visual = classifyMarkerVisual(location);
+            const isHoveredStage = hoveredQuestPointId === location.id;
+            const drawSize = isHoveredStage ? Math.min(56, iconSize + 8) : iconSize;
+            if (isHoveredStage) {
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y, drawSize * 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = "rgba(139, 92, 246, 0.18)";
+                ctx.fill();
+                ctx.strokeStyle = "rgba(245, 235, 255, 0.95)";
+                ctx.lineWidth = Math.max(2, drawSize * 0.12);
+                ctx.stroke();
+            }
+            drawMarkerShape(screen.x, screen.y, drawSize, visual);
+            drawMarkerGlyph(screen.x, screen.y, drawSize, visual);
+            if (locationLabelsToggle.checked && scale > minScale * 2.1) {
+                ctx.fillStyle = "#f1f5f9";
+                ctx.font = `${Math.max(10, Math.min(14, scale * 0.9))}px sans-serif`;
+                ctx.textAlign = "left";
+                ctx.textBaseline = "alphabetic";
+                const labelOffset = drawSize / 2;
+                ctx.fillText(location.name, screen.x + labelOffset + 4, screen.y - labelOffset);
+            }
+        }
+        return;
+    }
+    if (!locationsToggle.checked) {
         return;
     }
     const iconSize = Math.max(8, Math.min(48, locationIconSize));
     const halfIconSize = iconSize / 2;
-    for (const location of locations) {
+    for (const location of markerLocations) {
         if (!shouldRenderLocation(location)) {
             continue;
         }
         const image = worldToMapImage(location.world);
         const screen = imageToScreen(image, { scale, offsetX, offsetY });
         const visual = classifyMarkerVisual(location);
-        if (!selectedQuestKey && !isMarkerTypeEnabled(visual.key)) {
+        if (!isMarkerTypeEnabled(visual.key)) {
             continue;
         }
         drawMarkerShape(screen.x, screen.y, iconSize, visual);
@@ -1055,6 +1430,21 @@ function drawLocations() {
             ctx.fillText(location.name, screen.x + halfIconSize + 4, screen.y - halfIconSize);
         }
     }
+    for (const { quest, location } of getVisibleQuestStarts()) {
+        const image = worldToMapImage(location.world);
+        const screen = imageToScreen(image, { scale, offsetX, offsetY });
+        const visual = classifyMarkerVisual(location);
+        drawMarkerShape(screen.x, screen.y, iconSize, visual);
+        drawMarkerGlyph(screen.x, screen.y, iconSize, visual);
+        if (locationLabelsToggle.checked && scale > minScale * 2.1) {
+            ctx.fillStyle = "#f1f5f9";
+            ctx.font = `${Math.max(10, Math.min(14, scale * 0.9))}px sans-serif`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "alphabetic";
+            const labelOffset = iconSize / 2;
+            ctx.fillText(quest.label, screen.x + labelOffset + 4, screen.y - labelOffset);
+        }
+    }
 }
 function drawHoverLabel() {
     if (!hoveredLabel) {
@@ -1062,7 +1452,13 @@ function drawHoverLabel() {
     }
     const paddingX = 10;
     const margin = 12;
-    const maxLabelWidth = Math.min(420, viewportWidth - margin * 2);
+    const desktopMenuWidth = mobileMenuMediaQuery.matches ? 0 : questMenu.clientWidth;
+    const mobileLeftInset = openMobileMenu === "markers" ? sideMenu.clientWidth : 0;
+    const mobileRightInset = openMobileMenu === "quests" ? questMenu.clientWidth : 0;
+    const reservedRight = desktopMenuWidth + mobileRightInset;
+    const reservedLeft = mobileLeftInset;
+    const availableWidth = Math.max(160, viewportWidth - reservedLeft - reservedRight - margin * 2);
+    const maxLabelWidth = Math.min(420, availableWidth);
     const boxHeight = 26;
     ctx.font = "13px sans-serif";
     let label = hoveredLabel;
@@ -1075,7 +1471,7 @@ function drawHoverLabel() {
         }
     }
     const boxWidth = Math.min(maxLabelWidth, Math.max(120, textWidth + paddingX * 2));
-    const boxX = viewportWidth - boxWidth - margin;
+    const boxX = Math.max(margin + reservedLeft, viewportWidth - reservedRight - boxWidth - margin);
     const boxY = viewportHeight - boxHeight - margin;
     ctx.fillStyle = "rgba(0,0,0,0.78)";
     ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
@@ -1120,13 +1516,20 @@ function updateHover(clientX, clientY) {
     setCoordinateReadout(world, image);
     let bestDistance = Infinity;
     let bestName = "";
-    if (selectedQuestKey || locationsToggle.checked) {
-        for (const location of locations) {
-            if (!shouldRenderLocation(location)) {
+    const hoverLocations = activeOverlayMode === "quest"
+        ? getActiveQuestLocations()
+        : [...markerLocations, ...getVisibleQuestStarts().map((entry) => entry.location)];
+    if ((activeOverlayMode === "quest" && hoverLocations.length > 0) || (activeOverlayMode === "marker" && locationsToggle.checked)) {
+        for (const location of hoverLocations) {
+            if (activeOverlayMode === "marker" && !shouldRenderLocation(location)) {
+                continue;
+            }
+            if (activeOverlayMode === "quest" &&
+                (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world))) {
                 continue;
             }
             const visual = classifyMarkerVisual(location);
-            if (!selectedQuestKey && !isMarkerTypeEnabled(visual.key)) {
+            if (activeOverlayMode === "marker" && !isMarkerTypeEnabled(visual.key)) {
                 continue;
             }
             const dx = location.world.x - world.x;
@@ -1142,32 +1545,64 @@ function updateHover(clientX, clientY) {
     hoveredLabel = bestName;
     draw();
 }
+function findClickedQuestStart(clientX, clientY) {
+    if (activeOverlayMode !== "marker" || !locationsToggle.checked || !questStartsEnabled) {
+        return null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const hitRadius = Math.max(10, Math.min(28, locationIconSize * 0.85));
+    let bestMatch = null;
+    for (const entry of getVisibleQuestStarts()) {
+        const image = worldToMapImage(entry.location.world);
+        const screen = imageToScreen(image, { scale, offsetX, offsetY });
+        const distance = Math.hypot(screen.x - x, screen.y - y);
+        if (distance > hitRadius) {
+            continue;
+        }
+        if (!bestMatch || distance < bestMatch.distance) {
+            bestMatch = { quest: entry.quest, distance };
+        }
+    }
+    return bestMatch?.quest ?? null;
+}
 function applyMobileMenuState() {
     const isMobileLayout = mobileMenuMediaQuery.matches;
-    document.body.classList.toggle("mobile-menu-open", isMobileLayout && isMobileMenuOpen);
-    mobileMenuBackdrop.hidden = !(isMobileLayout && isMobileMenuOpen);
-    mobileMenuToggleBtn.setAttribute("aria-expanded", String(isMobileLayout && isMobileMenuOpen));
+    const isMarkerMenuOpen = isMobileLayout && openMobileMenu === "markers";
+    const isQuestMenuOpen = isMobileLayout && openMobileMenu === "quests";
+    const isAnyMenuOpen = isMarkerMenuOpen || isQuestMenuOpen;
+    document.body.classList.toggle("mobile-menu-open", isAnyMenuOpen);
+    document.body.classList.toggle("mobile-marker-menu-open", isMarkerMenuOpen);
+    document.body.classList.toggle("mobile-quest-menu-open", isQuestMenuOpen);
+    mobileMenuBackdrop.hidden = !isAnyMenuOpen;
+    mobileMarkerMenuToggleBtn.setAttribute("aria-expanded", String(isMarkerMenuOpen));
+    mobileQuestMenuToggleBtn.setAttribute("aria-expanded", String(isQuestMenuOpen));
     if (isMobileLayout) {
         sideMenu.setAttribute("aria-modal", "true");
+        questMenu.setAttribute("aria-modal", "true");
     }
     else {
         sideMenu.removeAttribute("aria-modal");
+        questMenu.removeAttribute("aria-modal");
     }
 }
 function setMobileMenuOpen(nextOpen) {
     if (!mobileMenuMediaQuery.matches) {
-        isMobileMenuOpen = false;
+        openMobileMenu = null;
         applyMobileMenuState();
         return;
     }
-    isMobileMenuOpen = nextOpen;
+    openMobileMenu = nextOpen;
     applyMobileMenuState();
+    draw();
 }
 function syncMobileMenuForViewport() {
     if (!mobileMenuMediaQuery.matches) {
-        isMobileMenuOpen = false;
+        openMobileMenu = null;
     }
     applyMobileMenuState();
+    draw();
 }
 async function refreshCache() {
     const bundledCache = await loadBundledCache();
@@ -1179,12 +1614,14 @@ async function refreshCache() {
         : storedCache;
     applyRawData(baseCache.territoryRaw, baseCache.locationRaw, baseCache.mapData);
     const cacheStoreError = setStoredCache(baseCache);
-    const pathSummary = paths.length > 0 ? `, ${paths.length.toLocaleString()} paths` : "";
+    const totalVisiblePoints = markerLocations.length + questLocationById.size;
+    const totalVisiblePaths = markerPaths.length + questPathByKey.size;
+    const pathSummary = totalVisiblePaths > 0 ? `, ${totalVisiblePaths.toLocaleString()} paths` : "";
     const wikiSummary = baseCache.mapData?.stats && baseCache.mapData.stats.wikiCoordinateCount > 0
         ? `, ${baseCache.mapData.stats.wikiCoordinateCount.toLocaleString()} wiki coordinates`
         : "";
     const cacheStoreSummary = cacheStoreError ? ` Browser cache save skipped: ${cacheStoreError}.` : "";
-    baseStatusMessage = `Loaded ${territories.length.toLocaleString()} territories, ${locations.length.toLocaleString()} points${pathSummary}${wikiSummary} from cached data (${formatDateTime(baseCache.updatedAt)}).${cacheStoreSummary}`;
+    baseStatusMessage = `Loaded ${territories.length.toLocaleString()} territories, ${totalVisiblePoints.toLocaleString()} points${pathSummary}${wikiSummary} from cached data (${formatDateTime(baseCache.updatedAt)}).${cacheStoreSummary}`;
     updateStatus();
     draw();
 }
@@ -1193,6 +1630,7 @@ canvas.addEventListener("pointerdown", (event) => {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     isDragging = true;
+    dragMoved = false;
     dragStartX = x - offsetX;
     dragStartY = y - offsetY;
     canvas.classList.add("dragging");
@@ -1203,6 +1641,9 @@ canvas.addEventListener("pointermove", (event) => {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     if (isDragging) {
+        if (Math.abs(x - (dragStartX + offsetX)) > 4 || Math.abs(y - (dragStartY + offsetY)) > 4) {
+            dragMoved = true;
+        }
         offsetX = x - dragStartX;
         offsetY = y - dragStartY;
         draw();
@@ -1212,12 +1653,19 @@ canvas.addEventListener("pointermove", (event) => {
     }
 });
 canvas.addEventListener("pointerup", (event) => {
+    const clickedQuestStart = !dragMoved ? findClickedQuestStart(event.clientX, event.clientY) : null;
     isDragging = false;
+    dragMoved = false;
     canvas.classList.remove("dragging");
     canvas.releasePointerCapture(event.pointerId);
+    if (clickedQuestStart) {
+        revealQuestStartInLeftMenu(clickedQuestStart.key);
+        activateQuestFromStart(clickedQuestStart.key);
+    }
 });
 canvas.addEventListener("pointercancel", (event) => {
     isDragging = false;
+    dragMoved = false;
     canvas.classList.remove("dragging");
     canvas.releasePointerCapture(event.pointerId);
 });
@@ -1250,15 +1698,41 @@ canvas.addEventListener("wheel", (event) => {
     zoomAt(x, y, factor);
 }, { passive: false });
 territoriesToggle.addEventListener("change", draw);
-locationsToggle.addEventListener("change", draw);
-pathsToggle.addEventListener("change", draw);
+locationsToggle.addEventListener("change", () => {
+    setActiveOverlayMode("marker");
+});
+pathsToggle.addEventListener("change", () => {
+    setActiveOverlayMode("marker");
+});
 outOfBoundsMarkersToggle.addEventListener("change", () => {
     buildLegend();
+    buildQuestStageList();
+    if (activeOverlayMode === "quest" && selectedQuestKey) {
+        hoveredQuestPointId = "";
+        focusQuestOnMap();
+        return;
+    }
     draw();
 });
 locationLabelsToggle.addEventListener("change", draw);
 questSelect.addEventListener("change", () => {
     selectedQuestKey = questSelect.value;
+    hoveredQuestPointId = "";
+    buildQuestStageList();
+    if (selectedQuestKey) {
+        setActiveOverlayMode("quest");
+        focusQuestOnMap();
+        setMobileMenuOpen(null);
+        return;
+    }
+    updateStatus();
+    draw();
+});
+clearQuestSelectionBtn.addEventListener("click", () => {
+    selectedQuestKey = "";
+    questSelect.value = "";
+    hoveredQuestPointId = "";
+    buildQuestStageList();
     updateStatus();
     draw();
 });
@@ -1269,32 +1743,67 @@ locationIconSizeInput.addEventListener("input", () => {
 });
 legendToggleAllBtn.addEventListener("click", () => {
     const checkboxes = markerLegend.querySelectorAll('input[data-type-key]');
-    const groupToggles = markerLegend.querySelectorAll("input.legend-group-toggle");
-    const shouldEnableAll = [...checkboxes].some((checkbox) => !checkbox.checked);
     enabledMarkerTypes.clear();
     for (const checkbox of checkboxes) {
-        checkbox.checked = shouldEnableAll;
-        if (shouldEnableAll) {
-            const typeKey = checkbox.dataset.typeKey;
-            if (typeKey) {
-                enabledMarkerTypes.add(typeKey);
-            }
+        checkbox.checked = !checkbox.checked;
+        const typeKey = checkbox.dataset.typeKey;
+        if (!typeKey) {
+            continue;
+        }
+        if (typeKey === "quest") {
+            questStartsEnabled = checkbox.checked;
+            continue;
+        }
+        if (checkbox.checked) {
+            enabledMarkerTypes.add(typeKey);
         }
     }
-    for (const groupToggle of groupToggles) {
-        groupToggle.checked = shouldEnableAll;
-        groupToggle.indeterminate = false;
+    buildLegend();
+    if (activeOverlayMode !== "marker") {
+        setActiveOverlayMode("marker");
+        return;
     }
+    updateStatus();
+    hoveredLabel = "";
     draw();
 });
-mobileMenuToggleBtn.addEventListener("click", () => {
-    setMobileMenuOpen(!isMobileMenuOpen);
+sideMenu.addEventListener("change", () => {
+    setActiveOverlayMode("marker");
+});
+sideMenu.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest("button, input, label, summary")) {
+        setActiveOverlayMode("marker");
+    }
+});
+questMenu.addEventListener("change", () => {
+    if (selectedQuestKey) {
+        setActiveOverlayMode("quest");
+        return;
+    }
+    updateStatus();
+    draw();
+});
+questMenu.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest("button, select, label") && selectedQuestKey) {
+        setActiveOverlayMode("quest");
+    }
+});
+mobileMarkerMenuToggleBtn.addEventListener("click", () => {
+    setMobileMenuOpen(openMobileMenu === "markers" ? null : "markers");
 });
 mobileMenuCloseBtn.addEventListener("click", () => {
-    setMobileMenuOpen(false);
+    setMobileMenuOpen(null);
+});
+mobileQuestMenuToggleBtn.addEventListener("click", () => {
+    setMobileMenuOpen(openMobileMenu === "quests" ? null : "quests");
+});
+mobileQuestMenuCloseBtn.addEventListener("click", () => {
+    setMobileMenuOpen(null);
 });
 mobileMenuBackdrop.addEventListener("click", () => {
-    setMobileMenuOpen(false);
+    setMobileMenuOpen(null);
 });
 resetBtn.addEventListener("click", resetView);
 window.addEventListener("resize", () => {
@@ -1303,8 +1812,8 @@ window.addEventListener("resize", () => {
 });
 mobileMenuMediaQuery.addEventListener("change", syncMobileMenuForViewport);
 window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && isMobileMenuOpen) {
-        setMobileMenuOpen(false);
+    if (event.key === "Escape" && openMobileMenu) {
+        setMobileMenuOpen(null);
     }
 });
 updateLocationIconSizeLabel();

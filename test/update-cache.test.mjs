@@ -76,6 +76,43 @@ The real destination is (321, -999).
   );
 });
 
+test('extractInlineCoordinates keeps coordinates inside spoiler template bodies', () => {
+  const wikitext = `
+== Stage 8 ==
+{{HideSpoiler|
+The hidden chamber starts at [272, 82, -329].
+Then head deeper to [272, 67, -320].
+}}
+`;
+
+  const coordinates = extractInlineCoordinates(wikitext);
+
+  assert.deepEqual(
+    coordinates.map((coordinate) => ({ x: coordinate.x, y: coordinate.y, z: coordinate.z })),
+    [
+      { x: 272, y: 82, z: -329 },
+      { x: 272, y: 67, z: -320 },
+    ],
+  );
+});
+
+test('extractLocationTemplates reads nested RenderLocation templates inside spoiler bodies', () => {
+  const wikitext = `
+== Stage 2 ==
+{{HideSpoiler|
+{{RenderLocation|location=Sewer Entrance|x=-1997|y=76|z=-4508}}
+}}
+`;
+
+  const templates = extractLocationTemplates(wikitext);
+
+  assert.equal(templates.length, 1);
+  assert.deepEqual(
+    templates.map((template) => ({ x: template.x, y: template.y, z: template.z })),
+    [{ x: -1997, y: 76, z: -4508 }],
+  );
+});
+
 test('parseWikiExportXml reads page content and categories from a mediawiki export', () => {
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/" version="0.11" xml:lang="en">
@@ -269,6 +306,30 @@ The quest was reworked in 2.0.
   const page = mapData.pages.find((entry) => entry.title === 'The Fortuneteller');
   assert.ok(page);
   assert.equal(page.coordinateCount, 2);
+});
+
+test('buildUnifiedMapData includes spoiler-template quest coordinates in quest paths', () => {
+  const mapData = buildUnifiedMapData([], [
+    {
+      pageId: 1002,
+      title: 'A Grave Mistake',
+      categories: ['Category:Quests'],
+      wikitext: `
+{{Infobox/Quest|name=A Grave Mistake}}
+== Stage 8 ==
+{{HideSpoiler|
+There are four locations in the graveyard.
+* One of the locations is the church at [272, 82, -329].
+* Another of the locations is the house at [288, 84, -409].
+}}
+`,
+    },
+  ]);
+
+  const questPath = mapData.paths.find((path) => path.pageTitle === 'A Grave Mistake');
+  assert.ok(questPath);
+  assert.equal(questPath.kind, 'quest-path');
+  assert.deepEqual(questPath.pointIds, ['point:272,-329', 'point:288,-409']);
 });
 
 test('buildUnifiedMapData skips removed quest pages', () => {

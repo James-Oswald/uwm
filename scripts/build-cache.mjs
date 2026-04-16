@@ -459,37 +459,124 @@ function blankRanges(sourceText, ranges) {
   return characters.join('');
 }
 
-function findTransclusionRanges(sourceText) {
-  const ranges = [];
-  let depth = 0;
-  let startIndex = -1;
+function readTransclusion(sourceText, startIndex) {
+  if (sourceText.slice(startIndex, startIndex + 2) !== '{{') {
+    return null;
+  }
 
-  for (let index = 0; index < sourceText.length - 1; index += 1) {
+  let depth = 0;
+  for (let index = startIndex; index < sourceText.length - 1; index += 1) {
     const pair = sourceText.slice(index, index + 2);
     if (pair === '{{') {
-      if (depth === 0) {
-        startIndex = index;
-      }
       depth += 1;
       index += 1;
       continue;
     }
-    if (pair === '}}' && depth > 0) {
+    if (pair === '}}') {
       depth -= 1;
-      if (depth === 0 && startIndex !== -1) {
-        ranges.push({ startIndex, endIndex: index + 1 });
-        startIndex = -1;
-      }
       index += 1;
+      if (depth === 0) {
+        return {
+          startIndex,
+          endIndex: index,
+          text: sourceText.slice(startIndex, index + 1),
+        };
+      }
     }
   }
 
-  return ranges;
+  return null;
+}
+
+function findFirstTopLevelPipeIndex(templateBody) {
+  let templateDepth = 0;
+  let linkDepth = 0;
+
+  for (let index = 0; index < templateBody.length; index += 1) {
+    const pair = templateBody.slice(index, index + 2);
+    if (pair === '{{') {
+      templateDepth += 1;
+      index += 1;
+      continue;
+    }
+    if (pair === '}}' && templateDepth > 0) {
+      templateDepth -= 1;
+      index += 1;
+      continue;
+    }
+    if (pair === '[[') {
+      linkDepth += 1;
+      index += 1;
+      continue;
+    }
+    if (pair === ']]' && linkDepth > 0) {
+      linkDepth -= 1;
+      index += 1;
+      continue;
+    }
+    if (templateBody[index] === '|' && templateDepth === 0 && linkDepth === 0) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function getTemplateName(templateText) {
+  const body = templateText.slice(2, -2).trim();
+  const separatorIndex = findFirstTopLevelPipeIndex(body);
+  const rawName = separatorIndex === -1 ? body : body.slice(0, separatorIndex);
+  return canonicalizeWhitespace(rawName).replace(/_/g, ' ').toLowerCase();
+}
+
+function shouldPreserveInlineTemplateBody(templateName) {
+  return templateName.includes('spoiler');
+}
+
+function sanitizeInlineCoordinateSegment(sourceText) {
+  let result = '';
+
+  for (let index = 0; index < sourceText.length; index += 1) {
+    const pair = sourceText.slice(index, index + 2);
+    if (pair !== '{{') {
+      result += sourceText[index];
+      continue;
+    }
+
+    const transclusion = readTransclusion(sourceText, index);
+    if (!transclusion) {
+      result += sourceText[index];
+      continue;
+    }
+
+    const templateName = getTemplateName(transclusion.text);
+    if (!shouldPreserveInlineTemplateBody(templateName)) {
+      result += ' '.repeat(transclusion.text.length);
+      index = transclusion.endIndex;
+      continue;
+    }
+
+    const body = transclusion.text.slice(2, -2);
+    const separatorIndex = findFirstTopLevelPipeIndex(body);
+    if (separatorIndex === -1) {
+      result += ' '.repeat(transclusion.text.length);
+      index = transclusion.endIndex;
+      continue;
+    }
+
+    const innerContent = body.slice(separatorIndex + 1);
+    result += ' '.repeat(2 + separatorIndex + 1);
+    result += sanitizeInlineCoordinateSegment(innerContent);
+    result += ' '.repeat(2);
+    index = transclusion.endIndex;
+  }
+
+  return result;
 }
 
 function stripInlineCoordinateNoise(sourceText) {
   const withoutComments = sourceText.replace(/<!--[\s\S]*?-->/g, (match) => ' '.repeat(match.length));
-  return blankRanges(withoutComments, findTransclusionRanges(withoutComments));
+  return sanitizeInlineCoordinateSegment(withoutComments);
 }
 
 function splitTemplateParts(templateBody) {
@@ -587,16 +674,22 @@ function parseLocationTemplateText(templateText, startIndex, ordinal) {
 
 export function extractLocationTemplates(sourceText) {
   const matches = [];
-  const templatePattern = /\{\{\s*(?:location|renderlocation)\b[\s\S]*?\}\}/gi;
-
-  for (const match of sourceText.matchAll(templatePattern)) {
-    if (typeof match.index !== 'number') {
+  for (let index = 0; index < sourceText.length; index += 1) {
+    const pair = sourceText.slice(index, index + 2);
+    if (pair !== '{{') {
       continue;
     }
-    const parsed = parseLocationTemplateText(match[0], match.index, matches.length);
+
+    const transclusion = readTransclusion(sourceText, index);
+    if (!transclusion) {
+      continue;
+    }
+
+    const parsed = parseLocationTemplateText(transclusion.text, transclusion.startIndex, matches.length);
     if (parsed) {
       matches.push(parsed);
     }
+
   }
 
   return matches;

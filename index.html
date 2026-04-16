@@ -3,6 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, quest routes, and wiki-derived paths in a fast client-side viewer."
+    />
+    <meta name="theme-color" content="#111827" />
+    <link rel="canonical" href="https://james-oswald.github.io/uwm/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Unofficial Wynncraft Map" />
+    <meta property="og:title" content="Unofficial Wynncraft Map" />
+    <meta
+      property="og:description"
+      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, quest routes, and wiki-derived paths in a fast client-side viewer."
+    />
+    <meta property="og:url" content="https://james-oswald.github.io/uwm/" />
+    <meta property="og:image" content="https://james-oswald.github.io/uwm/TopographicMap.png" />
+    <meta
+      property="og:image:alt"
+      content="A topographic-style overview of the Wynncraft world used by the Unofficial Wynncraft Map."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Unofficial Wynncraft Map" />
+    <meta
+      name="twitter:description"
+      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, quest routes, and wiki-derived paths in a fast client-side viewer."
+    />
+    <meta name="twitter:image" content="https://james-oswald.github.io/uwm/TopographicMap.png" />
+    <meta
+      name="twitter:image:alt"
+      content="A topographic-style overview of the Wynncraft world used by the Unofficial Wynncraft Map."
+    />
     <title>Unofficial Wynncraft Map</title>
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
@@ -10,9 +40,26 @@
     <header class="topbar">
       <div class="topbar-header">
         <h1>Unofficial Wynncraft Map</h1>
-        <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="side-menu">
-          Legend
-        </button>
+        <div class="mobile-menu-buttons">
+          <button
+            id="mobile-marker-menu-toggle"
+            class="mobile-menu-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="side-menu"
+          >
+            Markers
+          </button>
+          <button
+            id="mobile-quest-menu-toggle"
+            class="mobile-menu-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="quest-menu"
+          >
+            Quests
+          </button>
+        </div>
       </div>
       <div class="controls">
         <label><input id="toggle-territories" type="checkbox" /> Territories</label>
@@ -26,14 +73,6 @@
           <output id="location-icon-size-value" for="location-icon-size">18px</output>
         </label>
         <button id="reset-view" type="button">Reset view</button>
-      </div>
-      <div class="quest-toolbar">
-        <label class="select-control quest-select-control" for="quest-select">
-          <span class="quest-select-label">Quest route</span>
-          <select id="quest-select">
-            <option value="">All quest starts</option>
-          </select>
-        </label>
       </div>
       <p id="status" aria-live="polite">Loading map data...</p>
       <div class="coord-readout" aria-live="polite">
@@ -67,6 +106,29 @@
       <section class="canvas-shell">
         <canvas id="map-canvas" aria-label="Wynncraft interactive map"></canvas>
       </section>
+
+      <aside id="quest-menu" class="side-menu side-menu-right" aria-label="Quest routes and quest markers">
+        <div class="side-menu-header">
+          <h2>Quest Routes</h2>
+          <div class="side-menu-actions">
+            <button id="clear-quest-selection" type="button">Clear</button>
+            <button id="mobile-quest-menu-close" class="mobile-menu-close" type="button" aria-label="Close quests">
+              Close
+            </button>
+          </div>
+        </div>
+        <p class="side-menu-copy">Quest markers stay separate from marker filters. Choose a quest here to show only that quest's route and points on the map.</p>
+        <label class="select-control quest-select-control" for="quest-select">
+          <span class="quest-select-label">Quest route</span>
+          <select id="quest-select">
+            <option value="">Select a quest</option>
+          </select>
+        </label>
+        <div id="quest-stage-panel" class="quest-stage-panel">
+          <p id="quest-stage-summary" class="quest-stage-summary">Select a quest to view its stages.</p>
+          <ol id="quest-stage-list" class="quest-stage-list"></ol>
+        </div>
+      </aside>
     </main>
 
     <script type="module" src="./dist/main.js"></script>
