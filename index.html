@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Unofficial Wynncraft Map</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Unofficial Wynncraft Map</h1>
+      <div class="controls">
+        <label><input id="toggle-territories" type="checkbox" checked /> Territories</label>
+        <label><input id="toggle-locations" type="checkbox" checked /> Important locations</label>
+        <button id="reset-view" type="button">Reset view</button>
+      </div>
+      <p id="status" aria-live="polite">Loading map data...</p>
+    </header>
+
+    <main class="canvas-shell">
+      <canvas id="map-canvas" aria-label="Wynncraft interactive map"></canvas>
+    </main>
+
+    <script type="module" src="./dist/main.js"></script>
+  </body>
+</html>
