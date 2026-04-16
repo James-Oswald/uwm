@@ -21,9 +21,71 @@ type LocationData = {
 };
 
 type OverlayPoint = {
+  id: string;
   name: string;
   icon: string;
+  kind: string;
+  pageTitles: string[];
+  sourceKinds: string[];
   world: Vec2;
+};
+
+type CachedMapPoint = {
+  id: string;
+  name: string;
+  icon: string;
+  kind: string;
+  x: number;
+  y?: number | null;
+  z: number;
+  pageTitles?: string[];
+  sourceKinds?: string[];
+};
+
+type CachedMapPath = {
+  id: string;
+  label: string;
+  kind: string;
+  pointIds: string[];
+  pageId?: number;
+  pageTitle?: string;
+};
+
+type CachedMapData = {
+  points: CachedMapPoint[];
+  paths: CachedMapPath[];
+  pages?: Array<{
+    id: string;
+    pageId?: number;
+    title: string;
+    pageType: string;
+    coordinateCount: number;
+    pointIds?: string[];
+  }>;
+  stats?: {
+    officialMarkerCount: number;
+    wikiCoordinateCount: number;
+    dedupedPointCount: number;
+    pathCount: number;
+    questPathCount: number;
+  };
+};
+
+type OverlayPath = {
+  id: string;
+  label: string;
+  kind: string;
+  pageTitle?: string;
+  points: Vec2[];
+};
+
+type QuestOption = {
+  key: string;
+  label: string;
+  pageType: string;
+  pointIds: string[];
+  startPointId: string | null;
+  pathId: string | null;
 };
 
 type MarkerVisual = {
@@ -50,6 +112,8 @@ type CachedPayload = {
   updatedAt: string;
   territoryRaw: unknown;
   locationRaw: unknown;
+  wikiRaw?: unknown;
+  mapData?: CachedMapData;
 };
 
 const MAP_IMAGE_URL = "./TopographicMap.png";
@@ -79,11 +143,15 @@ const MAP_IMAGE_CONTENT_BOX = {
   height: 6418,
 };
 
-// Empirical nudge after calibrating against the topographic image.
-// Positive X moves overlays right; negative Y moves overlays up.
-const MAP_OVERLAY_IMAGE_OFFSET = {
-  x: 53,
-  y: -60,
+// Fixed affine calibration derived from in-map anchors.
+// Keeping this independent from loaded data prevents new markers from shifting the map projection.
+const MAP_CALIBRATION = {
+  imageXFromWorldX: 1.002643330953846,
+  imageXFromWorldZ: -0.005900718062014146,
+  imageXOffset: 2537.547916827523,
+  imageYFromWorldX: 0.001020005851612517,
+  imageYFromWorldZ: 0.9959310292885365,
+  imageYOffset: 6589.284065629639,
 };
 
 const colorCache = new Map<string, string>();
@@ -91,9 +159,11 @@ const colorCache = new Map<string, string>();
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const territoriesToggle = document.querySelector<HTMLInputElement>("#toggle-territories")!;
 const locationsToggle = document.querySelector<HTMLInputElement>("#toggle-locations")!;
+const pathsToggle = document.querySelector<HTMLInputElement>("#toggle-paths")!;
 const locationLabelsToggle = document.querySelector<HTMLInputElement>("#toggle-location-labels")!;
 const locationIconSizeInput = document.querySelector<HTMLInputElement>("#location-icon-size")!;
 const locationIconSizeValue = document.querySelector<HTMLOutputElement>("#location-icon-size-value")!;
+const questSelect = document.querySelector<HTMLSelectElement>("#quest-select")!;
 const markerLegend = document.querySelector<HTMLDivElement>("#marker-legend")!;
 const legendToggleAllBtn = document.querySelector<HTMLButtonElement>("#legend-toggle-all")!;
 const mouseWorldCoordsEl = document.querySelector<HTMLSpanElement>("#mouse-world-coords")!;
@@ -118,6 +188,7 @@ let dragStartY = 0;
 
 let territories: OverlayTerritory[] = [];
 let locations: OverlayPoint[] = [];
+let paths: OverlayPath[] = [];
 let bounds = { ...MAP_WORLD_BOUNDS };
 let hoveredLabel = "";
 let viewportWidth = 0;
@@ -128,9 +199,13 @@ let lastPointerWorld: { x: number; z: number } | null = null;
 let lastPointerImage: { x: number; y: number } | null = null;
 const enabledMarkerTypes = new Set<string>();
 let hasInitializedMarkerTypes = false;
+let questOptions: QuestOption[] = [];
+let selectedQuestKey = "";
+let baseStatusMessage = "Loading map data...";
 
 const MARKER_TYPE_ORDER = [
   "quest",
+  "location",
   "bank",
   "travel-fast",
   "travel-seaskipper",
@@ -189,24 +264,31 @@ const MARKER_GROUP_META: Record<string, { label: string; description: string }> 
 };
 
 function worldToMapImage(point: Vec2): { x: number; y: number } {
-  const image = worldToImage(point, bounds, mapImage.width, mapImage.height, MAP_IMAGE_CONTENT_BOX);
   return {
-    x: image.x + MAP_OVERLAY_IMAGE_OFFSET.x,
-    y: image.y + MAP_OVERLAY_IMAGE_OFFSET.y,
+    x:
+      point.x * MAP_CALIBRATION.imageXFromWorldX +
+      point.z * MAP_CALIBRATION.imageXFromWorldZ +
+      MAP_CALIBRATION.imageXOffset,
+    y:
+      point.x * MAP_CALIBRATION.imageYFromWorldX +
+      point.z * MAP_CALIBRATION.imageYFromWorldZ +
+      MAP_CALIBRATION.imageYOffset,
   };
 }
 
 function mapImageToWorld(point: { x: number; y: number }): { x: number; z: number } {
-  return imageToWorld(
-    {
-      x: point.x - MAP_OVERLAY_IMAGE_OFFSET.x,
-      y: point.y - MAP_OVERLAY_IMAGE_OFFSET.y,
-    },
-    bounds,
-    mapImage.width,
-    mapImage.height,
-    MAP_IMAGE_CONTENT_BOX,
-  );
+  const a = MAP_CALIBRATION.imageXFromWorldX;
+  const b = MAP_CALIBRATION.imageXFromWorldZ;
+  const c = MAP_CALIBRATION.imageYFromWorldX;
+  const d = MAP_CALIBRATION.imageYFromWorldZ;
+  const determinant = a * d - b * c;
+  const translatedX = point.x - MAP_CALIBRATION.imageXOffset;
+  const translatedY = point.y - MAP_CALIBRATION.imageYOffset;
+
+  return {
+    x: (d * translatedX - b * translatedY) / determinant,
+    z: (-c * translatedX + a * translatedY) / determinant,
+  };
 }
 
 function updateLocationIconSizeLabel(): void {
@@ -251,6 +333,30 @@ function classifyMarkerVisual(location: OverlayPoint): MarkerVisual {
   const icon = location.icon.toLowerCase();
   const name = location.name.toLowerCase();
 
+  if (location.kind === "quest") {
+    return {
+      key: "quest",
+      label: "Quests",
+      description: "Quest starts and quest-path waypoints",
+      group: "activities",
+      fill: "#8b5cf6",
+      stroke: "#f5ebff",
+      glyph: "?",
+      shape: "circle",
+    };
+  }
+  if (location.kind === "location" && icon === "marker") {
+    return {
+      key: "location",
+      label: "Locations",
+      description: "Named world locations and wiki coordinate points",
+      group: "other",
+      fill: "#facc15",
+      stroke: "#111827",
+      glyph: "•",
+      shape: "circle",
+    };
+  }
   if (icon.includes("quest") || name.includes("quest")) {
     return {
       key: "quest",
@@ -660,6 +766,15 @@ function setStatus(message: string): void {
   statusEl.textContent = message;
 }
 
+function updateStatus(): void {
+  const questMessage = selectedQuestKey
+    ? ` Showing all quest points for ${selectedQuestKey}.`
+    : questOptions.length > 0
+      ? " Showing the start point for every quest."
+      : "";
+  setStatus(`${baseStatusMessage}${questMessage}`);
+}
+
 async function loadBundledCache(): Promise<CachedPayload> {
   try {
     const response = await fetch(BUNDLED_CACHE_URL, { headers: { Accept: "application/json" } });
@@ -844,7 +959,93 @@ function normalizeLocations(locationRaw: unknown): LocationData[] {
   return collected;
 }
 
-function applyRawData(territoryRaw: unknown, locationRaw: unknown): void {
+function normalizeMapData(mapData: CachedPayload["mapData"]): CachedMapData | null {
+  if (!mapData || typeof mapData !== "object") {
+    return null;
+  }
+
+  const raw = mapData as CachedMapData;
+  if (!Array.isArray(raw.points) || !Array.isArray(raw.paths)) {
+    return null;
+  }
+
+  return raw;
+}
+
+function buildQuestOptions(normalizedMapData: CachedMapData | null): QuestOption[] {
+  if (!normalizedMapData?.pages?.length) {
+    return [];
+  }
+
+  const questPathByTitle = new Map(
+    normalizedMapData.paths
+      .filter((path) => path.kind === "quest-path" && typeof path.pageTitle === "string")
+      .map((path) => [path.pageTitle as string, path]),
+  );
+
+  return normalizedMapData.pages
+    .filter((page) => page.pageType === "quest" || page.pageType === "mini-quest")
+    .map((page) => {
+      const path = questPathByTitle.get(page.title);
+      const pointIds = Array.isArray(path?.pointIds) && path.pointIds.length > 0 ? path.pointIds : Array.isArray(page.pointIds) ? page.pointIds : [];
+      return {
+        key: page.title,
+        label: page.title,
+        pageType: page.pageType,
+        pointIds,
+        startPointId: pointIds[0] ?? null,
+        pathId: path?.id ?? null,
+      };
+    })
+    .filter((quest) => quest.startPointId)
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function syncQuestSelectionControl(): void {
+  const validQuestKeys = new Set(questOptions.map((quest) => quest.key));
+  if (selectedQuestKey && !validQuestKeys.has(selectedQuestKey)) {
+    selectedQuestKey = "";
+  }
+
+  questSelect.replaceChildren();
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "All quest starts";
+  questSelect.append(defaultOption);
+
+  for (const quest of questOptions) {
+    const option = document.createElement("option");
+    option.value = quest.key;
+    option.textContent = quest.label;
+    questSelect.append(option);
+  }
+
+  questSelect.value = selectedQuestKey;
+}
+
+function shouldRenderLocation(location: OverlayPoint): boolean {
+  if (selectedQuestKey) {
+    const selectedQuest = questOptions.find((quest) => quest.key === selectedQuestKey);
+    return Boolean(selectedQuest && selectedQuest.pointIds.includes(location.id));
+  }
+
+  if (location.kind !== "quest") {
+    return true;
+  }
+
+  return questOptions.some((quest) => quest.startPointId === location.id);
+}
+
+function shouldRenderPath(path: OverlayPath): boolean {
+  if (!selectedQuestKey) {
+    return path.kind !== "quest-path";
+  }
+
+  return path.kind === "quest-path" && path.pageTitle === selectedQuestKey;
+}
+
+function applyRawData(territoryRaw: unknown, locationRaw: unknown, mapData?: CachedPayload["mapData"]): void {
   const normalizedTerritories = normalizeTerritories(territoryRaw);
   territories = Object.entries(normalizedTerritories).map(([name, value]) => ({
     name,
@@ -855,18 +1056,59 @@ function applyRawData(territoryRaw: unknown, locationRaw: unknown): void {
     end: { x: value.location.end[0], z: value.location.end[1] },
   }));
 
-  const locationsArr = normalizeLocations(locationRaw);
+  const normalizedMapData = normalizeMapData(mapData);
+  if (normalizedMapData) {
+    const pointById = new Map<string, OverlayPoint>();
 
-  locations = locationsArr
-    .filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.z))
-    .map((entry) => ({
-      name: entry.name,
-      icon: entry.icon,
-      world: { x: entry.x, z: entry.z },
-    }));
+    locations = normalizedMapData.points
+      .filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.z))
+      .map((entry) => {
+        const point: OverlayPoint = {
+          id: entry.id,
+          name: entry.name,
+          icon: entry.icon,
+          kind: entry.kind,
+          pageTitles: Array.isArray(entry.pageTitles) ? entry.pageTitles : [],
+          sourceKinds: Array.isArray(entry.sourceKinds) ? entry.sourceKinds : [],
+          world: { x: entry.x, z: entry.z },
+        };
+        pointById.set(point.id, point);
+        return point;
+      });
+    paths = normalizedMapData.paths
+      .map((path) => ({
+        id: path.id,
+        label: path.label,
+        kind: path.kind,
+        pageTitle: path.pageTitle,
+        points: path.pointIds
+          .map((pointId) => pointById.get(pointId)?.world)
+          .filter((point): point is Vec2 => Boolean(point)),
+      }))
+      .filter((path) => path.points.length >= 2);
+
+    questOptions = buildQuestOptions(normalizedMapData);
+  } else {
+    const locationsArr = normalizeLocations(locationRaw);
+
+    locations = locationsArr
+      .filter((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.z))
+      .map((entry, index) => ({
+        id: `legacy:${index}:${entry.x}:${entry.z}`,
+        name: entry.name,
+        icon: entry.icon,
+        kind: "location",
+        pageTitles: [],
+        sourceKinds: ["official-marker"],
+        world: { x: entry.x, z: entry.z },
+      }));
+    paths = [];
+    questOptions = [];
+  }
 
   updateWorldBounds();
   buildLegend();
+  syncQuestSelectionControl();
 }
 
 function formatDateTime(isoDate: string): string {
@@ -878,16 +1120,7 @@ function formatDateTime(isoDate: string): string {
 }
 
 function updateWorldBounds(): void {
-  const points: Vec2[] = [];
-
-  for (const territory of territories) {
-    points.push(territory.start, territory.end);
-  }
-  for (const location of locations) {
-    points.push(location.world);
-  }
-
-  bounds = fitBoundsToAspect(points, MAP_IMAGE_CONTENT_BOX.width / MAP_IMAGE_CONTENT_BOX.height, 0, MAP_WORLD_BOUNDS);
+  bounds = { ...MAP_WORLD_BOUNDS };
 }
 
 
@@ -979,8 +1212,40 @@ function drawTerritories(): void {
   ctx.globalAlpha = 1;
 }
 
+function drawPaths(): void {
+  if (!selectedQuestKey && !pathsToggle.checked) {
+    return;
+  }
+
+  for (const path of paths) {
+    if (!shouldRenderPath(path)) {
+      continue;
+    }
+    ctx.beginPath();
+
+    for (const [index, point] of path.points.entries()) {
+      const image = worldToMapImage(point);
+      const screen = imageToScreen(image, { scale, offsetX, offsetY });
+      if (index === 0) {
+        ctx.moveTo(screen.x, screen.y);
+      } else {
+        ctx.lineTo(screen.x, screen.y);
+      }
+    }
+
+    ctx.lineWidth = path.kind === "quest-path" ? Math.max(1.5, scale * 0.55) : Math.max(1, scale * 0.35);
+    ctx.strokeStyle = path.kind === "quest-path" ? "rgba(139, 92, 246, 0.72)" : "rgba(148, 163, 184, 0.55)";
+    ctx.setLineDash(path.kind === "quest-path" ? [] : [5, 4]);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+}
+
 function drawLocations(): void {
-  if (!locationsToggle.checked) {
+  if (!selectedQuestKey && !locationsToggle.checked) {
     return;
   }
 
@@ -988,10 +1253,13 @@ function drawLocations(): void {
   const halfIconSize = iconSize / 2;
 
   for (const location of locations) {
+    if (!shouldRenderLocation(location)) {
+      continue;
+    }
     const image = worldToMapImage(location.world);
     const screen = imageToScreen(image, { scale, offsetX, offsetY });
     const visual = classifyMarkerVisual(location);
-    if (!isMarkerTypeEnabled(visual.key)) {
+    if (!selectedQuestKey && !isMarkerTypeEnabled(visual.key)) {
       continue;
     }
     drawMarkerShape(screen.x, screen.y, iconSize, visual);
@@ -1053,6 +1321,7 @@ function draw(): void {
 
   ctx.drawImage(mapImage, offsetX, offsetY, mapImage.width * scale, mapImage.height * scale);
   drawTerritories();
+  drawPaths();
   drawLocations();
   drawHoverLabel();
 }
@@ -1084,10 +1353,13 @@ function updateHover(clientX: number, clientY: number): void {
   let bestDistance = Infinity;
   let bestName = "";
 
-  if (locationsToggle.checked) {
+  if (selectedQuestKey || locationsToggle.checked) {
     for (const location of locations) {
+      if (!shouldRenderLocation(location)) {
+        continue;
+      }
       const visual = classifyMarkerVisual(location);
-      if (!isMarkerTypeEnabled(visual.key)) {
+      if (!selectedQuestKey && !isMarkerTypeEnabled(visual.key)) {
         continue;
       }
       const dx = location.world.x - world.x;
@@ -1095,7 +1367,8 @@ function updateHover(clientX: number, clientY: number): void {
       const distance = Math.hypot(dx, dz);
       if (distance < bestDistance && distance < 55 / Math.max(scale, 0.4)) {
         bestDistance = distance;
-        bestName = `${location.name} (${Math.round(location.world.x)}, ${Math.round(location.world.z)})`;
+        const pageHint = location.pageTitles[0] && location.pageTitles[0] !== location.name ? ` • ${location.pageTitles[0]}` : "";
+        bestName = `${location.name}${pageHint} (${Math.round(location.world.x)}, ${Math.round(location.world.z)})`;
       }
     }
   }
@@ -1110,15 +1383,19 @@ async function refreshCache(): Promise<void> {
   const bundledMs = Date.parse(bundledCache.updatedAt);
   const storedMs = storedCache ? Date.parse(storedCache.updatedAt) : Number.NaN;
   const baseCache =
-    !storedCache || !Number.isFinite(storedMs) || bundledMs > storedMs
+    !storedCache || !Number.isFinite(storedMs) || bundledMs >= storedMs
       ? bundledCache
       : storedCache;
 
-  applyRawData(baseCache.territoryRaw, baseCache.locationRaw);
+  applyRawData(baseCache.territoryRaw, baseCache.locationRaw, baseCache.mapData);
   setStoredCache(baseCache);
-  setStatus(
-    `Loaded ${territories.length.toLocaleString()} territories and ${locations.length.toLocaleString()} locations from cached data (${formatDateTime(baseCache.updatedAt)}).`,
-  );
+  const pathSummary = paths.length > 0 ? `, ${paths.length.toLocaleString()} paths` : "";
+  const wikiSummary =
+    baseCache.mapData?.stats && baseCache.mapData.stats.wikiCoordinateCount > 0
+      ? `, ${baseCache.mapData.stats.wikiCoordinateCount.toLocaleString()} wiki coordinates`
+      : "";
+  baseStatusMessage = `Loaded ${territories.length.toLocaleString()} territories, ${locations.length.toLocaleString()} points${pathSummary}${wikiSummary} from cached data (${formatDateTime(baseCache.updatedAt)}).`;
+  updateStatus();
   draw();
 }
 
@@ -1200,7 +1477,13 @@ canvas.addEventListener(
 
 territoriesToggle.addEventListener("change", draw);
 locationsToggle.addEventListener("change", draw);
+pathsToggle.addEventListener("change", draw);
 locationLabelsToggle.addEventListener("change", draw);
+questSelect.addEventListener("change", () => {
+  selectedQuestKey = questSelect.value;
+  updateStatus();
+  draw();
+});
 locationIconSizeInput.addEventListener("input", () => {
   locationIconSize = Number(locationIconSizeInput.value) || 18;
   updateLocationIconSizeLabel();

@@ -14,10 +14,30 @@ const TERRITORY_CANDIDATES = [`${API_ORIGIN}/guild/list/territory`, `${API_ORIGI
 const LOCATION_CANDIDATES = [`${API_ORIGIN}/map/locations/markers`, `${API_ORIGIN}/map/locations`, `${API_ORIGIN}/map`];
 const LOCATION_SCRIPT_URL = 'https://map.wynncraft.com/js/labels.js';
 
+const WIKI_ORIGIN = 'https://wynncraft.wiki.gg';
+const WIKI_API_URL = `${WIKI_ORIGIN}/api.php`;
+const WIKI_LOCATION_TEMPLATE_TITLE = 'Template:Location';
+const WIKI_REVISION_BATCH_SIZE = 20;
+
 const EMPTY_PAYLOAD = {
   updatedAt: new Date(0).toISOString(),
   territoryRaw: {},
   locationRaw: [],
+  wikiRaw: {
+    pages: [],
+  },
+  mapData: {
+    points: [],
+    paths: [],
+    pages: [],
+    stats: {
+      officialMarkerCount: 0,
+      wikiCoordinateCount: 0,
+      dedupedPointCount: 0,
+      pathCount: 0,
+      questPathCount: 0,
+    },
+  },
 };
 
 async function fetchFirstJson(urls) {
@@ -37,6 +57,21 @@ async function fetchFirstJson(urls) {
   }
 
   throw new Error(`All endpoint attempts failed: ${failures.join(', ')}`);
+}
+
+async function fetchJson(url, params) {
+  const searchParams = new URLSearchParams({
+    format: 'json',
+    origin: '*',
+    ...params,
+  });
+  const response = await fetch(`${url}?${searchParams.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`${url} [${response.status}]`);
+  }
+  return await response.json();
 }
 
 function decodeJsStringLiteral(rawLiteral) {
@@ -123,6 +158,674 @@ async function fetchLocationData() {
   throw new Error(`All endpoint attempts failed: ${failures.join(', ')}`);
 }
 
+function canonicalizeWhitespace(value) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeName(value) {
+  return canonicalizeWhitespace(value)
+    .replace(/\s+/g, ' ')
+    .replace(/[’']/g, '')
+    .replace(/[^a-z0-9]+/gi, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function parseCoordinateParts(rawValue) {
+  if (typeof rawValue !== 'string') {
+    return null;
+  }
+
+  const parts = rawValue
+    .split(/[,\s/]+/)
+    .map((part) => part.trim().replace(/\.$/, ''))
+    .filter(Boolean)
+    .map((part) => Number(part));
+
+  if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) {
+    return null;
+  }
+
+  if (parts.length >= 3) {
+    return { x: parts[0], y: parts[1], z: parts[2] };
+  }
+
+  return { x: parts[0], y: null, z: parts[1] };
+}
+
+function createPointKey(x, z) {
+  return `${Math.round(x)},${Math.round(z)}`;
+}
+
+function pickPrimaryAlias(aliases, preferredNames) {
+  if (preferredNames.length > 0) {
+    return preferredNames[0];
+  }
+
+  const sortedAliases = [...aliases.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]));
+  return sortedAliases[0]?.[0] ?? 'Location';
+}
+
+function classifyPointKind(point) {
+  if (point.tags.has('quest-path')) {
+    return 'quest';
+  }
+  if (point.tags.has('travel')) {
+    return 'travel';
+  }
+  if (point.tags.has('service')) {
+    return 'service';
+  }
+  if (point.tags.has('hazard')) {
+    return 'hazard';
+  }
+  return 'location';
+}
+
+function createPointRecord(existingPoint, input) {
+  const point = existingPoint ?? {
+    id: `point:${createPointKey(input.x, input.z)}`,
+    x: Math.round(input.x),
+    z: Math.round(input.z),
+    y: Number.isFinite(input.y) ? Math.round(input.y) : null,
+    aliases: new Map(),
+    sourceKinds: new Set(),
+    icons: new Set(),
+    tags: new Set(),
+    pages: new Set(),
+    sourceRefs: [],
+  };
+
+  if (input.alias) {
+    point.aliases.set(input.alias, (point.aliases.get(input.alias) ?? 0) + 1);
+  }
+  if (input.icon) {
+    point.icons.add(input.icon);
+  }
+  if (input.pageTitle) {
+    point.pages.add(input.pageTitle);
+  }
+  for (const tag of input.tags ?? []) {
+    point.tags.add(tag);
+  }
+
+  point.sourceKinds.add(input.sourceKind);
+  point.sourceRefs.push(input.sourceRef);
+  if (!Number.isFinite(point.y) && Number.isFinite(input.y)) {
+    point.y = Math.round(input.y);
+  }
+
+  return point;
+}
+
+function normalizeLocations(locationRaw) {
+  const collected = [];
+  const seen = new Set();
+
+  const pushCandidate = (name, icon, x, z) => {
+    const parsedX = Number(x);
+    const parsedZ = Number(z);
+    if (!Number.isFinite(parsedX) || !Number.isFinite(parsedZ)) {
+      return;
+    }
+    const key = `${name}|${parsedX}|${parsedZ}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    collected.push({ name, icon, x: parsedX, z: parsedZ });
+  };
+
+  const pushFromTuple = (name, icon, tuple) => {
+    if (!Array.isArray(tuple) || tuple.length < 2) {
+      return;
+    }
+    if (tuple.length >= 3) {
+      pushCandidate(name, icon, tuple[0], tuple[2]);
+      return;
+    }
+    pushCandidate(name, icon, tuple[0], tuple[1]);
+  };
+
+  const pushFromCoordinateString = (name, icon, rawValue) => {
+    const parsed = parseCoordinateParts(rawValue);
+    if (!parsed) {
+      return;
+    }
+    pushCandidate(name, icon, parsed.x, parsed.z);
+  };
+
+  const visit = (value, fallbackName) => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item, fallbackName);
+      }
+      return;
+    }
+
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+
+    const obj = value;
+    const name = typeof obj.name === 'string' ? obj.name : fallbackName;
+    const icon = typeof obj.icon === 'string' ? obj.icon : 'marker';
+
+    if (Array.isArray(obj.coords)) {
+      pushFromTuple(name, icon, obj.coords);
+    }
+    if (Array.isArray(obj.coordinates)) {
+      pushFromTuple(name, icon, obj.coordinates);
+    }
+    if ('x' in obj && 'z' in obj) {
+      pushCandidate(name, icon, obj.x, obj.z);
+    } else if ('x' in obj && 'y' in obj) {
+      pushCandidate(name, icon, obj.x, obj.y);
+    } else if ('latitude' in obj && 'longitude' in obj) {
+      pushCandidate(name, icon, obj.longitude, obj.latitude);
+    }
+
+    pushFromCoordinateString(name, icon, obj.coord);
+    pushFromCoordinateString(name, icon, obj.coords);
+    pushFromCoordinateString(name, icon, obj.location);
+    pushFromCoordinateString(name, icon, obj.position);
+
+    if (Array.isArray(obj.location)) {
+      pushFromTuple(name, icon, obj.location);
+    }
+
+    for (const [key, nested] of Object.entries(obj)) {
+      if (
+        key === 'name' ||
+        key === 'icon' ||
+        key === 'x' ||
+        key === 'z' ||
+        key === 'y' ||
+        key === 'coords' ||
+        key === 'coord' ||
+        key === 'coordinates' ||
+        key === 'location' ||
+        key === 'position' ||
+        key === 'latitude' ||
+        key === 'longitude'
+      ) {
+        continue;
+      }
+      visit(nested, key);
+    }
+  };
+
+  if (Array.isArray(locationRaw)) {
+    visit(locationRaw, 'Location');
+    return collected;
+  }
+
+  if (!locationRaw || typeof locationRaw !== 'object') {
+    return [];
+  }
+
+  const rawObj = locationRaw;
+  if (Array.isArray(rawObj.locations)) {
+    visit(rawObj.locations, 'Location');
+    return collected;
+  }
+
+  if (rawObj.locations && typeof rawObj.locations === 'object') {
+    visit(rawObj.locations, 'Location');
+    return collected;
+  }
+
+  visit(rawObj, 'Location');
+  return collected;
+}
+
+function stripComments(value) {
+  return value.replace(/<!--[\s\S]*?-->/g, '');
+}
+
+function splitTemplateParts(templateBody) {
+  const parts = [];
+  let current = '';
+  let templateDepth = 0;
+  let linkDepth = 0;
+
+  for (let index = 0; index < templateBody.length; index += 1) {
+    const pair = templateBody.slice(index, index + 2);
+    if (pair === '{{') {
+      templateDepth += 1;
+      current += pair;
+      index += 1;
+      continue;
+    }
+    if (pair === '}}' && templateDepth > 0) {
+      templateDepth -= 1;
+      current += pair;
+      index += 1;
+      continue;
+    }
+    if (pair === '[[') {
+      linkDepth += 1;
+      current += pair;
+      index += 1;
+      continue;
+    }
+    if (pair === ']]' && linkDepth > 0) {
+      linkDepth -= 1;
+      current += pair;
+      index += 1;
+      continue;
+    }
+    if (templateDepth === 0 && linkDepth === 0 && templateBody[index] === '|') {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += templateBody[index];
+  }
+
+  parts.push(current);
+  return parts;
+}
+
+function parseLocationTemplateText(templateText, startIndex, ordinal) {
+  const endIndex = startIndex + templateText.length - 1;
+  const body = templateText.slice(2, -2).trim();
+  const parts = splitTemplateParts(body);
+  const templateName = canonicalizeWhitespace(parts.shift() ?? '').replace(/_/g, ' ').toLowerCase();
+
+  if (templateName !== 'location' && templateName !== 'renderlocation') {
+    return null;
+  }
+
+  const fields = {};
+  for (const part of parts) {
+    const equalsIndex = part.indexOf('=');
+    if (equalsIndex === -1) {
+      continue;
+    }
+    const rawKey = canonicalizeWhitespace(part.slice(0, equalsIndex)).toLowerCase();
+    const rawValue = canonicalizeWhitespace(stripComments(part.slice(equalsIndex + 1)));
+    fields[rawKey] = rawValue;
+  }
+
+  const coords =
+    parseCoordinateParts(fields.coordinates) ??
+    (() => {
+      const x = Number(fields.x);
+      const y = Number(fields.y);
+      const z = Number(fields.z);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        return null;
+      }
+      return { x, y: Number.isFinite(y) ? y : null, z };
+    })();
+
+  if (!coords) {
+    return null;
+  }
+
+  return {
+    ordinal,
+    startIndex,
+    endIndex,
+    templateText,
+    fields,
+    x: coords.x,
+    y: coords.y,
+    z: coords.z,
+  };
+}
+
+export function extractLocationTemplates(sourceText) {
+  const matches = [];
+  const templatePattern = /\{\{\s*(?:location|renderlocation)\b[\s\S]*?\}\}/gi;
+
+  for (const match of sourceText.matchAll(templatePattern)) {
+    if (typeof match.index !== 'number') {
+      continue;
+    }
+    const parsed = parseLocationTemplateText(match[0], match.index, matches.length);
+    if (parsed) {
+      matches.push(parsed);
+    }
+  }
+
+  return matches;
+}
+
+function isPrimaryWikiTitle(title) {
+  if (typeof title !== 'string' || !title) {
+    return false;
+  }
+
+  if (/\/[a-z]{2,3}(?:-[a-z0-9]{2,8})+$/i.test(title) || /\/[a-z]{2,5}$/i.test(title)) {
+    return false;
+  }
+
+  if (/\(\d+\.\d+\)$/.test(title)) {
+    return false;
+  }
+
+  if (/\/archive$/i.test(title)) {
+    return false;
+  }
+
+  return true;
+}
+
+function detectWikiPageType(title, wikitext) {
+  const content = wikitext.toLowerCase();
+
+  if (content.includes('{{infobox/quest')) {
+    return 'quest';
+  }
+  if (content.includes('{{infobox/miniquest')) {
+    return 'mini-quest';
+  }
+  if (content.includes('{{infobox/location') || content.includes('{{minorlocation')) {
+    return 'location';
+  }
+  if (content.includes('{{infobox/dungeon')) {
+    return 'dungeon';
+  }
+  if (content.includes('{{infobox/mob')) {
+    return 'mob';
+  }
+  if (/\(quest\)/i.test(title)) {
+    return 'quest';
+  }
+  return 'wiki';
+}
+
+function isRemovedWikiPage(wikitext) {
+  if (typeof wikitext !== 'string') {
+    return false;
+  }
+
+  return /\{\{\s*removed\b/i.test(wikitext);
+}
+
+function extractStageContext(wikitext, locationTemplates) {
+  const headings = [];
+  const headingPattern = /^==+\s*(.+?)\s*==+\s*$/gm;
+  let match;
+
+  while ((match = headingPattern.exec(wikitext))) {
+    headings.push({
+      title: canonicalizeWhitespace(match[1]),
+      index: match.index,
+    });
+  }
+
+  return locationTemplates.map((location) => {
+    let activeHeading = '';
+    for (const heading of headings) {
+      if (heading.index >= location.startIndex) {
+        break;
+      }
+      activeHeading = heading.title;
+    }
+    return {
+      ...location,
+      stageLabel: activeHeading,
+    };
+  });
+}
+
+async function fetchWikiEmbeddedPages() {
+  const pages = [];
+  let continueToken = null;
+
+  while (true) {
+    const response = await fetchJson(WIKI_API_URL, {
+      action: 'query',
+      list: 'embeddedin',
+      eititle: WIKI_LOCATION_TEMPLATE_TITLE,
+      einamespace: '0',
+      eilimit: '500',
+      ...(continueToken ?? {}),
+    });
+
+    const chunk = response?.query?.embeddedin ?? [];
+    for (const page of chunk) {
+      if (page?.ns !== 0 || !isPrimaryWikiTitle(page.title)) {
+        continue;
+      }
+      pages.push({
+        pageId: page.pageid,
+        title: page.title,
+      });
+    }
+
+    if (!response.continue) {
+      break;
+    }
+
+    continueToken = {
+      continue: response.continue.continue,
+      eicontinue: response.continue.eicontinue,
+    };
+  }
+
+  return pages;
+}
+
+async function fetchWikiRevisionsBatch(titles) {
+  const response = await fetchJson(WIKI_API_URL, {
+    action: 'query',
+    prop: 'revisions|categories',
+    rvprop: 'content',
+    rvslots: 'main',
+    cllimit: 'max',
+    redirects: '1',
+    formatversion: '2',
+    titles: titles.join('|'),
+  });
+
+  const pages = response?.query?.pages ?? [];
+  return pages
+    .filter((page) => !page.missing && typeof page.title === 'string')
+    .map((page) => ({
+      pageId: page.pageid,
+      title: page.title,
+      categories: Array.isArray(page.categories) ? page.categories.map((category) => category.title) : [],
+      wikitext: page.revisions?.[0]?.slots?.main?.content ?? '',
+    }))
+    .filter((page) => page.wikitext);
+}
+
+async function fetchWikiLocationPages() {
+  const embeddedPages = await fetchWikiEmbeddedPages();
+  const fetchedPages = [];
+
+  for (let index = 0; index < embeddedPages.length; index += WIKI_REVISION_BATCH_SIZE) {
+    const batch = embeddedPages.slice(index, index + WIKI_REVISION_BATCH_SIZE);
+    const titles = batch.map((page) => page.title);
+    const chunkPages = await fetchWikiRevisionsBatch(titles);
+    fetchedPages.push(...chunkPages);
+    console.log(`Fetched wiki pages ${Math.min(index + batch.length, embeddedPages.length)}/${embeddedPages.length}.`);
+  }
+
+  return fetchedPages;
+}
+
+function tagsForOfficialMarker(location) {
+  const icon = String(location.icon ?? '').toLowerCase();
+  const name = String(location.name ?? '').toLowerCase();
+
+  if (icon.includes('quest') || name.includes('quest')) {
+    return ['quest-path', 'activity'];
+  }
+  if (icon.includes('fasttravel') || icon.includes('seaskipper') || name.includes('seaskipper') || name.includes('balloon')) {
+    return ['travel'];
+  }
+  if (icon.includes('emerald') || icon.includes('merchant') || icon.includes('identifier') || icon.includes('potion')) {
+    return ['service'];
+  }
+  if (icon.includes('cave') || icon.includes('dungeon') || icon.includes('raid') || icon.includes('bossaltar')) {
+    return ['hazard'];
+  }
+
+  return ['location'];
+}
+
+function tagsForWikiPageType(pageType) {
+  switch (pageType) {
+    case 'quest':
+    case 'mini-quest':
+      return ['quest-path', 'activity'];
+    case 'dungeon':
+      return ['hazard'];
+    case 'location':
+      return ['location'];
+    default:
+      return ['wiki'];
+  }
+}
+
+export function buildUnifiedMapData(locationRaw, wikiPagesRaw) {
+  const pointMap = new Map();
+  const officialLocations = normalizeLocations(locationRaw);
+
+  for (const location of officialLocations) {
+    const key = createPointKey(location.x, location.z);
+    const point = createPointRecord(pointMap.get(key), {
+      x: location.x,
+      y: null,
+      z: location.z,
+      alias: location.name,
+      icon: location.icon,
+      sourceKind: 'official-marker',
+      sourceRef: {
+        kind: 'official-marker',
+        name: location.name,
+        icon: location.icon,
+      },
+      tags: tagsForOfficialMarker(location),
+    });
+    pointMap.set(key, point);
+  }
+
+  const pages = [];
+  const paths = [];
+  let wikiCoordinateCount = 0;
+
+  for (const rawPage of wikiPagesRaw) {
+    if (!rawPage?.title || !rawPage?.wikitext) {
+      continue;
+    }
+    if (!isPrimaryWikiTitle(rawPage.title)) {
+      continue;
+    }
+    if (isRemovedWikiPage(rawPage.wikitext)) {
+      continue;
+    }
+
+    const pageType = detectWikiPageType(rawPage.title, rawPage.wikitext);
+    const templates = extractStageContext(rawPage.wikitext, extractLocationTemplates(rawPage.wikitext));
+    if (templates.length === 0) {
+      continue;
+    }
+
+    const pagePointIds = [];
+
+    for (const template of templates) {
+      wikiCoordinateCount += 1;
+      const key = createPointKey(template.x, template.z);
+      const alias =
+        pageType === 'quest' || pageType === 'mini-quest'
+          ? template.stageLabel
+            ? `${rawPage.title} - ${template.stageLabel}`
+            : rawPage.title
+          : rawPage.title;
+      const point = createPointRecord(pointMap.get(key), {
+        x: template.x,
+        y: template.y,
+        z: template.z,
+        alias,
+        icon: pageType === 'quest' || pageType === 'mini-quest' ? 'quest' : 'marker',
+        pageTitle: rawPage.title,
+        sourceKind: 'wiki-location-template',
+        sourceRef: {
+          kind: 'wiki-location-template',
+          pageId: rawPage.pageId,
+          pageTitle: rawPage.title,
+          pageType,
+          stageLabel: template.stageLabel || null,
+          ordinal: template.ordinal,
+        },
+        tags: tagsForWikiPageType(pageType),
+      });
+      pointMap.set(key, point);
+      pagePointIds.push(point.id);
+    }
+
+    const dedupedPagePointIds = pagePointIds.filter((pointId, index) => index === 0 || pointId !== pagePointIds[index - 1]);
+    const categories = Array.isArray(rawPage.categories) ? rawPage.categories : [];
+
+    const pageRecord = {
+      id: `wiki:${rawPage.pageId}`,
+      pageId: rawPage.pageId,
+      title: rawPage.title,
+      url: `${WIKI_ORIGIN}/wiki/${encodeURIComponent(rawPage.title.replace(/ /g, '_'))}`,
+      pageType,
+      categories,
+      coordinateCount: templates.length,
+      pointIds: [...new Set(pagePointIds)],
+    };
+    pages.push(pageRecord);
+
+    if (dedupedPagePointIds.length >= 2) {
+      const kind = pageType === 'quest' || pageType === 'mini-quest' ? 'quest-path' : 'wiki-sequence';
+      paths.push({
+        id: `${kind}:${rawPage.pageId}`,
+        pageId: rawPage.pageId,
+        pageTitle: rawPage.title,
+        label: rawPage.title,
+        kind,
+        pointIds: dedupedPagePointIds,
+      });
+    }
+  }
+
+  const points = [...pointMap.values()]
+    .map((point) => {
+      const aliases = [...point.aliases.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]));
+      const preferredNames = point.sourceRefs
+        .filter((source) => source.kind === 'official-marker' && typeof source.name === 'string' && normalizeName(source.name) !== 'location')
+        .map((source) => source.name);
+      const name = pickPrimaryAlias(point.aliases, preferredNames);
+      return {
+        id: point.id,
+        name,
+        x: point.x,
+        y: point.y,
+        z: point.z,
+        icon: point.icons.has('quest') ? 'quest' : point.icons.values().next().value ?? 'marker',
+        kind: classifyPointKind(point),
+        aliases: aliases.map(([alias]) => alias),
+        pageTitles: [...point.pages].sort((a, b) => a.localeCompare(b)),
+        sourceKinds: [...point.sourceKinds].sort((a, b) => a.localeCompare(b)),
+        tags: [...point.tags].sort((a, b) => a.localeCompare(b)),
+        sourceRefs: point.sourceRefs,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || a.x - b.x || a.z - b.z);
+
+  return {
+    points,
+    paths,
+    pages: pages.sort((a, b) => a.title.localeCompare(b.title)),
+    stats: {
+      officialMarkerCount: officialLocations.length,
+      wikiCoordinateCount,
+      dedupedPointCount: points.length,
+      pathCount: paths.length,
+      questPathCount: paths.filter((path) => path.kind === 'quest-path').length,
+    },
+  };
+}
+
 async function loadPreviousPayload() {
   try {
     const raw = await readFile(outputPath, 'utf8');
@@ -131,17 +834,20 @@ async function loadPreviousPayload() {
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : EMPTY_PAYLOAD.updatedAt,
       territoryRaw: parsed.territoryRaw ?? EMPTY_PAYLOAD.territoryRaw,
       locationRaw: parsed.locationRaw ?? EMPTY_PAYLOAD.locationRaw,
+      wikiRaw: parsed.wikiRaw ?? EMPTY_PAYLOAD.wikiRaw,
+      mapData: parsed.mapData ?? EMPTY_PAYLOAD.mapData,
     };
   } catch {
     return EMPTY_PAYLOAD;
   }
 }
 
-async function main() {
+export async function main() {
   const previous = await loadPreviousPayload();
 
   let territoryRaw = previous.territoryRaw;
   let locationRaw = previous.locationRaw;
+  let wikiRaw = previous.wikiRaw;
 
   try {
     territoryRaw = await fetchFirstJson(TERRITORY_CANDIDATES);
@@ -157,19 +863,39 @@ async function main() {
     console.warn(`Location refresh failed, reusing previous cache: ${error instanceof Error ? error.message : error}`);
   }
 
+  try {
+    const pages = await fetchWikiLocationPages();
+    wikiRaw = {
+      fetchedAt: new Date().toISOString(),
+      pageCount: pages.length,
+      pages,
+    };
+    console.log(`Fetched ${pages.length} wiki pages using ${WIKI_LOCATION_TEMPLATE_TITLE}.`);
+  } catch (error) {
+    console.warn(`Wiki refresh failed, reusing previous cache: ${error instanceof Error ? error.message : error}`);
+  }
+
+  const mapData = buildUnifiedMapData(locationRaw, wikiRaw.pages ?? []);
+
   const payload = {
     updatedAt: new Date().toISOString(),
     territoryRaw,
     locationRaw,
+    wikiRaw,
+    mapData,
   };
 
   await mkdir(resolve(repoRoot, 'cache'), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 
-  console.log(`Cache updated at ${outputPath}`);
+  console.log(
+    `Cache updated at ${outputPath} with ${mapData.stats.dedupedPointCount} points and ${mapData.stats.pathCount} paths.`,
+  );
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

@@ -12,6 +12,7 @@
       <div class="controls">
         <label><input id="toggle-territories" type="checkbox" /> Territories</label>
         <label><input id="toggle-locations" type="checkbox" checked /> Important locations</label>
+        <label><input id="toggle-paths" type="checkbox" checked /> Wiki paths</label>
         <label><input id="toggle-location-labels" type="checkbox" /> Location labels</label>
         <label class="range-control" for="location-icon-size">
           Icon size
@@ -19,6 +20,14 @@
           <output id="location-icon-size-value" for="location-icon-size">18px</output>
         </label>
         <button id="reset-view" type="button">Reset view</button>
+      </div>
+      <div class="quest-toolbar">
+        <label class="select-control quest-select-control" for="quest-select">
+          <span class="quest-select-label">Quest route</span>
+          <select id="quest-select">
+            <option value="">All quest starts</option>
+          </select>
+        </label>
       </div>
       <p id="status" aria-live="polite">Loading map data...</p>
       <div class="coord-readout" aria-live="polite">
@@ -39,7 +48,7 @@
           <h2>Marker Legend</h2>
           <button id="legend-toggle-all" type="button">Toggle all</button>
         </div>
-        <p class="side-menu-copy">Filter map markers by type and use the legend to learn what each symbol means.</p>
+        <p class="side-menu-copy">Filter unified map points by type and use the legend to learn what each symbol means. Wiki-derived paths can be toggled from the top bar.</p>
         <div id="marker-legend" class="legend-list"></div>
       </aside>
 
