@@ -1,4 +1,5 @@
-type Vec2 = { x: number; z: number };
+import { imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
+import type { Vec2 } from "./alignment.js";
 
 type TerritoryData = {
   guild: {
@@ -344,23 +345,6 @@ function updateWorldBounds(): void {
   bounds = { ...MAP_WORLD_BOUNDS };
 }
 
-function worldToImage(point: Vec2): { x: number; y: number } {
-  const xRatio = (point.x - bounds.minX) / (bounds.maxX - bounds.minX);
-  const zRatio = (point.z - bounds.minZ) / (bounds.maxZ - bounds.minZ);
-
-  return {
-    x: xRatio * mapImage.width,
-    y: zRatio * mapImage.height,
-  };
-}
-
-function imageToScreen(point: { x: number; y: number }): { x: number; y: number } {
-  return {
-    x: point.x * scale + offsetX,
-    y: point.y * scale + offsetY,
-  };
-}
-
 function getScaleToFitViewport(): number {
   if (!mapImage.width || !mapImage.height) {
     return 1;
@@ -384,12 +368,10 @@ function zoomAt(screenX: number, screenY: number, zoomMultiplier: number): void 
     return;
   }
 
-  const imageX = (screenX - offsetX) / scale;
-  const imageY = (screenY - offsetY) / scale;
-
-  scale = nextScale;
-  offsetX = screenX - imageX * scale;
-  offsetY = screenY - imageY * scale;
+  const nextView = zoomAtPoint({ x: screenX, y: screenY }, { scale, offsetX, offsetY }, nextScale);
+  scale = nextView.scale;
+  offsetX = nextView.offsetX;
+  offsetY = nextView.offsetY;
 
   draw();
 }
@@ -414,15 +396,15 @@ function drawTerritories(): void {
   }
 
   for (const territory of territories) {
-    const start = worldToImage(territory.start);
-    const end = worldToImage(territory.end);
+    const start = worldToImage(territory.start, bounds, mapImage.width, mapImage.height);
+    const end = worldToImage(territory.end, bounds, mapImage.width, mapImage.height);
 
     const left = Math.min(start.x, end.x);
     const top = Math.min(start.y, end.y);
     const width = Math.abs(end.x - start.x);
     const height = Math.abs(end.y - start.y);
 
-    const screen = imageToScreen({ x: left, y: top });
+    const screen = imageToScreen({ x: left, y: top }, { scale, offsetX, offsetY });
     const screenWidth = width * scale;
     const screenHeight = height * scale;
 
@@ -462,8 +444,8 @@ function drawLocations(): void {
   ctx.lineWidth = 1;
 
   for (const location of locations) {
-    const image = worldToImage(location.world);
-    const screen = imageToScreen(image);
+    const image = worldToImage(location.world, bounds, mapImage.width, mapImage.height);
+    const screen = imageToScreen(image, { scale, offsetX, offsetY });
 
     ctx.beginPath();
     ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
@@ -514,13 +496,9 @@ function resizeCanvas(): void {
   resetView();
 }
 
-function screenToWorld(screenX: number, screenY: number): Vec2 {
-  const imageX = (screenX - offsetX) / scale;
-  const imageY = (screenY - offsetY) / scale;
-
-  const x = bounds.minX + (imageX / mapImage.width) * (bounds.maxX - bounds.minX);
-  const z = bounds.minZ + (imageY / mapImage.height) * (bounds.maxZ - bounds.minZ);
-  return { x, z };
+function screenToWorld(screenX: number, screenY: number): { x: number; z: number } {
+  const imagePoint = screenToImage({ x: screenX, y: screenY }, { scale, offsetX, offsetY });
+  return imageToWorld(imagePoint, bounds, mapImage.width, mapImage.height);
 }
 
 function updateHover(clientX: number, clientY: number): void {
