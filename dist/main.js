@@ -1,11 +1,7 @@
 import { imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
 const MAP_IMAGE_URL = "./TopographicMap.png";
-const API_ORIGIN = "https://api.wynncraft.com/v3";
-const TERRITORY_CANDIDATES = [`${API_ORIGIN}/guild/list/territory`, `${API_ORIGIN}/guild/territory`];
-const LOCATION_CANDIDATES = [`${API_ORIGIN}/map/locations`, `${API_ORIGIN}/map`];
 const BUNDLED_CACHE_URL = "./cache/wynn-data.json";
 const CACHE_STORAGE_KEY = "wynn-map-cached-data";
-const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const EMPTY_CACHE_PAYLOAD = {
     updatedAt: new Date(0).toISOString(),
     territoryRaw: {},
@@ -21,7 +17,6 @@ const colorCache = new Map();
 const canvas = document.querySelector("#map-canvas");
 const territoriesToggle = document.querySelector("#toggle-territories");
 const locationsToggle = document.querySelector("#toggle-locations");
-const refreshCacheBtn = document.querySelector("#refresh-cache");
 const resetBtn = document.querySelector("#reset-view");
 const statusEl = document.querySelector("#status");
 const ctx = canvas.getContext("2d");
@@ -44,25 +39,6 @@ let viewportWidth = 0;
 let viewportHeight = 0;
 function setStatus(message) {
     statusEl.textContent = message;
-}
-async function fetchFirstJson(urls) {
-    const failures = [];
-    for (const url of urls) {
-        try {
-            const response = await fetch(url, {
-                headers: { Accept: "application/json" },
-            });
-            if (!response.ok) {
-                failures.push(`${url} [${response.status}]`);
-                continue;
-            }
-            return (await response.json());
-        }
-        catch {
-            failures.push(`${url} [network-error]`);
-        }
-    }
-    throw new Error(`All endpoint attempts failed: ${failures.join(", ")}`);
 }
 async function loadBundledCache() {
     try {
@@ -244,13 +220,6 @@ function applyRawData(territoryRaw, locationRaw) {
     }));
     updateWorldBounds();
 }
-function isCacheStale(updatedAt) {
-    const updatedMs = Date.parse(updatedAt);
-    if (!Number.isFinite(updatedMs)) {
-        return true;
-    }
-    return Date.now() - updatedMs >= CACHE_MAX_AGE_MS;
-}
 function formatDateTime(isoDate) {
     const parsed = new Date(isoDate);
     if (Number.isNaN(parsed.getTime())) {
@@ -409,39 +378,18 @@ function updateHover(clientX, clientY) {
     hoveredLabel = bestName;
     draw();
 }
-async function tryFetchLivePayload() {
-    const [territoryRaw, locationRaw] = await Promise.all([
-        fetchFirstJson(TERRITORY_CANDIDATES),
-        fetchFirstJson(LOCATION_CANDIDATES),
-    ]);
-    return {
-        updatedAt: new Date().toISOString(),
-        territoryRaw,
-        locationRaw,
-    };
-}
-async function refreshCache(forceRefresh) {
+async function refreshCache() {
     const bundledCache = await loadBundledCache();
     const storedCache = getStoredCache();
-    const baseCache = storedCache ?? bundledCache;
+    const bundledMs = Date.parse(bundledCache.updatedAt);
+    const storedMs = storedCache ? Date.parse(storedCache.updatedAt) : Number.NaN;
+    const baseCache = !storedCache || !Number.isFinite(storedMs) || bundledMs > storedMs
+        ? bundledCache
+        : storedCache;
     applyRawData(baseCache.territoryRaw, baseCache.locationRaw);
+    setStoredCache(baseCache);
     setStatus(`Loaded ${territories.length.toLocaleString()} territories and ${locations.length.toLocaleString()} locations from cached data (${formatDateTime(baseCache.updatedAt)}).`);
-    const shouldRefresh = forceRefresh || isCacheStale(baseCache.updatedAt) || locations.length === 0;
-    if (!shouldRefresh) {
-        return;
-    }
-    setStatus("Refreshing cache from Wynncraft API...");
-    try {
-        const freshPayload = await tryFetchLivePayload();
-        setStoredCache(freshPayload);
-        applyRawData(freshPayload.territoryRaw, freshPayload.locationRaw);
-        setStatus(`Live refresh succeeded. Loaded ${territories.length.toLocaleString()} territories and ${locations.length.toLocaleString()} locations (${formatDateTime(freshPayload.updatedAt)}).`);
-        draw();
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-        setStatus(`Using cached data from ${formatDateTime(baseCache.updatedAt)} (live refresh failed due to CORS/API issue: ${message}).`);
-    }
+    draw();
 }
 canvas.addEventListener("pointerdown", (event) => {
     isDragging = true;
@@ -481,9 +429,6 @@ canvas.addEventListener("wheel", (event) => {
 }, { passive: false });
 territoriesToggle.addEventListener("change", draw);
 locationsToggle.addEventListener("change", draw);
-refreshCacheBtn.addEventListener("click", () => {
-    void refreshCache(true);
-});
 resetBtn.addEventListener("click", resetView);
 window.addEventListener("resize", resizeCanvas);
 Promise.all([
@@ -491,7 +436,7 @@ Promise.all([
         mapImage.onload = () => resolve();
         mapImage.onerror = () => reject(new Error("TopographicMap.png failed to load."));
     }),
-    refreshCache(false),
+    refreshCache(),
 ])
     .then(() => {
     resizeCanvas();
