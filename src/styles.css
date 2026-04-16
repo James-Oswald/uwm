@@ -3,11 +3,17 @@
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   background: #101417;
   color: #e9edf1;
-  min-height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -105,12 +111,14 @@ body {
 
 .app-shell {
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 19rem minmax(0, 1fr);
   overflow: hidden;
 }
 
 .side-menu {
+  min-height: 0;
   border-right: 1px solid #29333f;
   background: #0f151c;
   padding: 0.9rem 0.85rem;
@@ -170,6 +178,11 @@ body {
   background: #15212b;
 }
 
+.legend-group-toggle {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
 .legend-group-summary::-webkit-details-marker {
   display: none;
 }
@@ -189,6 +202,7 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  flex: 1;
 }
 
 .legend-group-name {
@@ -285,6 +299,7 @@ body {
 
 .canvas-shell {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 

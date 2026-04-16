@@ -63,19 +63,22 @@ let locationIconSize = Number(locationIconSizeInput.value) || 18;
 let lastPointerWorld = null;
 let lastPointerImage = null;
 const enabledMarkerTypes = new Set();
+let hasInitializedMarkerTypes = false;
 const MARKER_TYPE_ORDER = [
     "quest",
     "bank",
     "travel-fast",
     "travel-seaskipper",
     "travel-balloon",
+    "potion",
+    "scroll-merchant",
     "merchant",
     "identifier",
     "station",
     "cave",
     "dungeon",
-    "altar",
-    "potion",
+    "boss-altar",
+    "raid",
     "misc",
 ];
 const MARKER_GROUP_ORDER = [
@@ -110,7 +113,7 @@ const MARKER_GROUP_META = {
     },
     hazards: {
         label: "Hazards",
-        description: "Caves, dungeons, altars, and raid content",
+        description: "Caves, dungeons, boss altars, and raids",
     },
     other: {
         label: "Other",
@@ -237,11 +240,26 @@ function classifyMarkerVisual(location) {
             shape: "circle",
         };
     }
+    if (icon.includes("merchant_scroll") ||
+        icon.includes("scroll") ||
+        name.includes("scroll merchant") ||
+        name.includes("scrolls")) {
+        return {
+            key: "scroll-merchant",
+            label: "Scroll Merchants",
+            description: "Teleport and utility scroll vendors",
+            group: "vendors",
+            fill: "#c08457",
+            stroke: "#fff7ed",
+            glyph: "S",
+            shape: "diamond",
+        };
+    }
     if (icon.includes("blacksmith") || icon.includes("weapon") || icon.includes("armour") || name.includes("merchant")) {
         return {
             key: "merchant",
             label: "Vendors",
-            description: "Shops, buyers, scroll merchants, and general vendors",
+            description: "Shops, buyers, and general vendors",
             group: "vendors",
             fill: "#f59e0b",
             stroke: "#fffbeb",
@@ -297,15 +315,27 @@ function classifyMarkerVisual(location) {
             shape: "hex",
         };
     }
-    if (icon.includes("raid") || icon.includes("bossaltar") || icon.includes("corrupteddungeon") || name.includes("altar")) {
+    if (icon.includes("bossaltar") || name.includes("boss altar")) {
         return {
-            key: "altar",
-            label: "Altars & Raids",
-            description: "Boss altars, corrupted dungeons, and raids",
+            key: "boss-altar",
+            label: "Boss Altars",
+            description: "Boss altars and altar encounters",
             group: "hazards",
             fill: "#991b1b",
             stroke: "#fee2e2",
             glyph: "✦",
+            shape: "hex",
+        };
+    }
+    if (icon.includes("raid") || icon.includes("corrupteddungeon")) {
+        return {
+            key: "raid",
+            label: "Raids",
+            description: "Raid entrances and corrupted dungeons",
+            group: "hazards",
+            fill: "#7f1d1d",
+            stroke: "#fecaca",
+            glyph: "☠",
             shape: "hex",
         };
     }
@@ -367,7 +397,7 @@ function drawMarkerGlyph(screenX, screenY, size, visual) {
     ctx.fillText(visual.glyph, screenX, screenY + size * 0.02);
 }
 function isMarkerTypeEnabled(typeKey) {
-    return enabledMarkerTypes.size === 0 || enabledMarkerTypes.has(typeKey);
+    return enabledMarkerTypes.has(typeKey);
 }
 function buildLegend() {
     const counts = new Map();
@@ -388,10 +418,11 @@ function buildLegend() {
         const normalizedB = orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB;
         return normalizedA - normalizedB || a.visual.label.localeCompare(b.visual.label);
     });
-    if (enabledMarkerTypes.size === 0) {
+    if (!hasInitializedMarkerTypes) {
         for (const entry of entries) {
             enabledMarkerTypes.add(entry.visual.key);
         }
+        hasInitializedMarkerTypes = true;
     }
     const grouped = new Map();
     for (const entry of entries) {
@@ -417,6 +448,12 @@ function buildLegend() {
         details.open = true;
         const summary = document.createElement("summary");
         summary.className = "legend-group-summary";
+        const groupToggle = document.createElement("input");
+        groupToggle.type = "checkbox";
+        groupToggle.className = "legend-group-toggle";
+        groupToggle.addEventListener("click", (event) => {
+            event.stopPropagation();
+        });
         const groupMeta = document.createElement("span");
         groupMeta.className = "legend-group-meta";
         const groupName = document.createElement("span");
@@ -429,10 +466,33 @@ function buildLegend() {
         const groupCount = document.createElement("span");
         groupCount.className = "legend-group-count";
         groupCount.textContent = groupEntries.reduce((sum, entry) => sum + entry.count, 0).toLocaleString();
-        summary.append(groupMeta, groupCount);
-        details.append(summary);
         const groupList = document.createElement("div");
         groupList.className = "legend-group-list";
+        const itemCheckboxes = [];
+        const syncGroupToggle = () => {
+            const checkedCount = itemCheckboxes.filter((checkbox) => checkbox.checked).length;
+            groupToggle.checked = checkedCount > 0 && checkedCount === itemCheckboxes.length;
+            groupToggle.indeterminate = checkedCount > 0 && checkedCount < itemCheckboxes.length;
+        };
+        groupToggle.addEventListener("change", () => {
+            for (const checkbox of itemCheckboxes) {
+                checkbox.checked = groupToggle.checked;
+                const typeKey = checkbox.dataset.typeKey;
+                if (!typeKey) {
+                    continue;
+                }
+                if (groupToggle.checked) {
+                    enabledMarkerTypes.add(typeKey);
+                }
+                else {
+                    enabledMarkerTypes.delete(typeKey);
+                }
+            }
+            syncGroupToggle();
+            draw();
+        });
+        summary.append(groupToggle, groupMeta, groupCount);
+        details.append(summary);
         for (const entry of groupEntries) {
             const row = document.createElement("label");
             row.className = "legend-item";
@@ -447,8 +507,10 @@ function buildLegend() {
                 else {
                     enabledMarkerTypes.delete(entry.visual.key);
                 }
+                syncGroupToggle();
                 draw();
             });
+            itemCheckboxes.push(checkbox);
             const symbol = document.createElement("span");
             symbol.className = `legend-symbol shape-${entry.visual.shape}`;
             symbol.style.background = entry.visual.fill;
@@ -472,6 +534,7 @@ function buildLegend() {
             row.append(checkbox, symbol, meta, count);
             groupList.append(row);
         }
+        syncGroupToggle();
         details.append(groupList);
         markerLegend.append(details);
     }
@@ -775,11 +838,29 @@ function drawHoverLabel() {
     if (!hoveredLabel) {
         return;
     }
-    ctx.fillStyle = "rgba(0,0,0,0.75)";
-    ctx.fillRect(10, viewportHeight - 36, Math.min(viewportWidth - 20, 420), 26);
-    ctx.fillStyle = "#f8fafc";
+    const paddingX = 10;
+    const margin = 12;
+    const maxLabelWidth = Math.min(420, viewportWidth - margin * 2);
+    const boxHeight = 26;
     ctx.font = "13px sans-serif";
-    ctx.fillText(hoveredLabel, 16, viewportHeight - 19);
+    let label = hoveredLabel;
+    let textWidth = ctx.measureText(label).width;
+    if (textWidth > maxLabelWidth - paddingX * 2) {
+        const ellipsis = "…";
+        while (label.length > 1 && textWidth > maxLabelWidth - paddingX * 2) {
+            label = `${label.slice(0, -2)}${ellipsis}`;
+            textWidth = ctx.measureText(label).width;
+        }
+    }
+    const boxWidth = Math.min(maxLabelWidth, Math.max(120, textWidth + paddingX * 2));
+    const boxX = viewportWidth - boxWidth - margin;
+    const boxY = viewportHeight - boxHeight - margin;
+    ctx.fillStyle = "rgba(0,0,0,0.78)";
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+    ctx.fillStyle = "#f8fafc";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(label, boxX + paddingX, boxY + 17);
 }
 function draw() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -917,7 +998,8 @@ locationIconSizeInput.addEventListener("input", () => {
     draw();
 });
 legendToggleAllBtn.addEventListener("click", () => {
-    const checkboxes = markerLegend.querySelectorAll('input[type="checkbox"]');
+    const checkboxes = markerLegend.querySelectorAll('input[data-type-key]');
+    const groupToggles = markerLegend.querySelectorAll("input.legend-group-toggle");
     const shouldEnableAll = [...checkboxes].some((checkbox) => !checkbox.checked);
     enabledMarkerTypes.clear();
     for (const checkbox of checkboxes) {
@@ -928,6 +1010,10 @@ legendToggleAllBtn.addEventListener("click", () => {
                 enabledMarkerTypes.add(typeKey);
             }
         }
+    }
+    for (const groupToggle of groupToggles) {
+        groupToggle.checked = shouldEnableAll;
+        groupToggle.indeterminate = false;
     }
     draw();
 });

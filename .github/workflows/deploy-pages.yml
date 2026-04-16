@@ -47,7 +47,7 @@ jobs:
           cp index.html _site/
           cp src/styles.css _site/src/
           cp TopographicMap.png _site/
-          cp dist/main.js _site/dist/
+          cp dist/*.js _site/dist/
           cp cache/wynn-data.json _site/cache/
 
       - name: Setup Pages
