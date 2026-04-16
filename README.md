@@ -27,24 +27,40 @@ The cache now stores:
 
 - raw territory API data,
 - raw official map marker data,
-- raw wiki page scrape results for pages that embed `Template:Location`,
+- raw wiki page data loaded from a local MediaWiki XML backup,
+- a compressed wiki page backup at `cache/wiki-pages-backup.xml.gz` for offline reuse,
 - a normalized `mapData` layer with deduplicated `points`, wiki `paths`, and page metadata.
+
+## Refresh workflow
+
+Use the scripts below in sequence:
+
+```bash
+npm run scrape:wiki
+npm run build:cache
+npm run serve
+```
+
+`scrape:wiki` downloads a compressed MediaWiki XML backup of the relevant wiki pages.
+
+`build:cache` refreshes the official API data, reads the local wiki XML backup, and writes `cache/wynn-data.json`.
 
 ## Refresh cache data from Node (recommended weekly)
 
-Use the script below in CI or cron to regenerate `cache/wynn-data.json`:
+Use the scripts below in CI or cron to refresh the wiki backup and rebuild `cache/wynn-data.json`:
 
 ```bash
-npm run update-cache
+npm run scrape:wiki
+npm run build:cache
 ```
 
 Suggested weekly cron (UTC Sundays at 02:00):
 
 ```cron
-0 2 * * 0 cd /path/to/repo && npm ci && npm run update-cache
+0 2 * * 0 cd /path/to/repo && npm ci && npm run scrape:wiki && npm run build:cache
 ```
 
-The refresh script is resilient: if one source is unavailable, it keeps the previous cached value for that section and still rebuilds the normalized `mapData` layer from whatever data is available.
+The build step is resilient: if one source is unavailable, it keeps the previous cached value for that section and still rebuilds the normalized `mapData` layer from whatever data is available.
 
 ## Endpoint notes
 
@@ -57,10 +73,14 @@ The refresh script is resilient: if one source is unavailable, it keeps the prev
   - `https://api.wynncraft.com/v3/map`
 - If those API routes are unavailable, the refresh script falls back to parsing the official map labels script for named place labels only:
   - `https://map.wynncraft.com/js/labels.js`
-- Wiki coordinate scraping uses the MediaWiki API to:
+- The wiki backup script uses the MediaWiki API to:
   - enumerate pages embedding `Template:Location`
-  - fetch page wikitext and categories
-  - extract `x`, `y`, `z`, and `coordinates` values from template calls
-  - build sequential path data for quest and multi-coordinate pages
+  - enumerate quest-category pages so quest prose can be parsed even when no location template is present
+  - export the selected pages as MediaWiki XML
+- The cache builder then:
+  - reads page wikitext from the local XML backup
+  - extracts `x`, `y`, `z`, and `coordinates` values from template calls
+  - extracts inline quest coordinates like `[x, y, z]` or `(x, z)` from stage text
+  - builds sequential path data for quest and multi-coordinate pages
 
 This fallback keeps the app resilient if the API path changes between versions.

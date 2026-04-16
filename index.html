@@ -8,11 +8,17 @@
   </head>
   <body>
     <header class="topbar">
-      <h1>Unofficial Wynncraft Map</h1>
+      <div class="topbar-header">
+        <h1>Unofficial Wynncraft Map</h1>
+        <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="side-menu">
+          Legend
+        </button>
+      </div>
       <div class="controls">
         <label><input id="toggle-territories" type="checkbox" /> Territories</label>
         <label><input id="toggle-locations" type="checkbox" checked /> Important locations</label>
         <label><input id="toggle-paths" type="checkbox" checked /> Wiki paths</label>
+        <label><input id="toggle-out-of-bounds-markers" type="checkbox" /> Out-of-bounds markers</label>
         <label><input id="toggle-location-labels" type="checkbox" /> Location labels</label>
         <label class="range-control" for="location-icon-size">
           Icon size
@@ -43,10 +49,16 @@
     </header>
 
     <main class="app-shell">
-      <aside class="side-menu" aria-label="Marker legend and filters">
+      <div id="mobile-menu-backdrop" class="mobile-menu-backdrop" hidden></div>
+      <aside id="side-menu" class="side-menu" aria-label="Marker legend and filters">
         <div class="side-menu-header">
           <h2>Marker Legend</h2>
-          <button id="legend-toggle-all" type="button">Toggle all</button>
+          <div class="side-menu-actions">
+            <button id="legend-toggle-all" type="button">Toggle all</button>
+            <button id="mobile-menu-close" class="mobile-menu-close" type="button" aria-label="Close legend">
+              Close
+            </button>
+          </div>
         </div>
         <p class="side-menu-copy">Filter unified map points by type and use the legend to learn what each symbol means. Wiki-derived paths can be toggled from the top bar.</p>
         <div id="marker-legend" class="legend-list"></div>

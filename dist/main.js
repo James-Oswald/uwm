@@ -36,12 +36,17 @@ const canvas = document.querySelector("#map-canvas");
 const territoriesToggle = document.querySelector("#toggle-territories");
 const locationsToggle = document.querySelector("#toggle-locations");
 const pathsToggle = document.querySelector("#toggle-paths");
+const outOfBoundsMarkersToggle = document.querySelector("#toggle-out-of-bounds-markers");
 const locationLabelsToggle = document.querySelector("#toggle-location-labels");
 const locationIconSizeInput = document.querySelector("#location-icon-size");
 const locationIconSizeValue = document.querySelector("#location-icon-size-value");
 const questSelect = document.querySelector("#quest-select");
 const markerLegend = document.querySelector("#marker-legend");
 const legendToggleAllBtn = document.querySelector("#legend-toggle-all");
+const mobileMenuToggleBtn = document.querySelector("#mobile-menu-toggle");
+const mobileMenuCloseBtn = document.querySelector("#mobile-menu-close");
+const mobileMenuBackdrop = document.querySelector("#mobile-menu-backdrop");
+const sideMenu = document.querySelector("#side-menu");
 const mouseWorldCoordsEl = document.querySelector("#mouse-world-coords");
 const mouseImageCoordsEl = document.querySelector("#mouse-image-coords");
 const resetBtn = document.querySelector("#reset-view");
@@ -74,6 +79,8 @@ let hasInitializedMarkerTypes = false;
 let questOptions = [];
 let selectedQuestKey = "";
 let baseStatusMessage = "Loading map data...";
+let isMobileMenuOpen = false;
+const mobileMenuMediaQuery = window.matchMedia("(max-width: 980px)");
 const MARKER_TYPE_ORDER = [
     "quest",
     "location",
@@ -157,6 +164,15 @@ function mapImageToWorld(point) {
 function updateLocationIconSizeLabel() {
     locationIconSizeValue.value = `${locationIconSize}px`;
     locationIconSizeValue.textContent = `${locationIconSize}px`;
+}
+function isPointWithinMapBounds(point) {
+    return (point.x >= MAP_WORLD_BOUNDS.minX &&
+        point.x <= MAP_WORLD_BOUNDS.maxX &&
+        point.z >= MAP_WORLD_BOUNDS.minZ &&
+        point.z <= MAP_WORLD_BOUNDS.maxZ);
+}
+function shouldShowOutOfBoundsMarkers() {
+    return outOfBoundsMarkersToggle.checked;
 }
 function setCoordinateReadout(world, image) {
     if (!world || !image) {
@@ -447,6 +463,9 @@ function isMarkerTypeEnabled(typeKey) {
 function buildLegend() {
     const counts = new Map();
     for (const location of locations) {
+        if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
+            continue;
+        }
         const visual = classifyMarkerVisual(location);
         const current = counts.get(visual.key);
         if (current) {
@@ -620,7 +639,16 @@ function getStoredCache() {
     }
 }
 function setStoredCache(payload) {
-    localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(payload));
+    try {
+        localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(payload));
+        return null;
+    }
+    catch (error) {
+        if (error instanceof Error) {
+            return error.message;
+        }
+        return "Unknown cache storage error";
+    }
 }
 function normalizeTerritories(territoryRaw) {
     if (!territoryRaw || typeof territoryRaw !== "object") {
@@ -808,6 +836,9 @@ function syncQuestSelectionControl() {
     questSelect.value = selectedQuestKey;
 }
 function shouldRenderLocation(location) {
+    if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
+        return false;
+    }
     if (selectedQuestKey) {
         const selectedQuest = questOptions.find((quest) => quest.key === selectedQuestKey);
         return Boolean(selectedQuest && selectedQuest.pointIds.includes(location.id));
@@ -972,8 +1003,14 @@ function drawPaths() {
         if (!shouldRenderPath(path)) {
             continue;
         }
+        const pointsToDraw = shouldShowOutOfBoundsMarkers()
+            ? path.points.filter((point) => isPointWithinMapBounds(point))
+            : path.points;
+        if (pointsToDraw.length < 2) {
+            continue;
+        }
         ctx.beginPath();
-        for (const [index, point] of path.points.entries()) {
+        for (const [index, point] of pointsToDraw.entries()) {
             const image = worldToMapImage(point);
             const screen = imageToScreen(image, { scale, offsetX, offsetY });
             if (index === 0) {
@@ -1105,6 +1142,33 @@ function updateHover(clientX, clientY) {
     hoveredLabel = bestName;
     draw();
 }
+function applyMobileMenuState() {
+    const isMobileLayout = mobileMenuMediaQuery.matches;
+    document.body.classList.toggle("mobile-menu-open", isMobileLayout && isMobileMenuOpen);
+    mobileMenuBackdrop.hidden = !(isMobileLayout && isMobileMenuOpen);
+    mobileMenuToggleBtn.setAttribute("aria-expanded", String(isMobileLayout && isMobileMenuOpen));
+    if (isMobileLayout) {
+        sideMenu.setAttribute("aria-modal", "true");
+    }
+    else {
+        sideMenu.removeAttribute("aria-modal");
+    }
+}
+function setMobileMenuOpen(nextOpen) {
+    if (!mobileMenuMediaQuery.matches) {
+        isMobileMenuOpen = false;
+        applyMobileMenuState();
+        return;
+    }
+    isMobileMenuOpen = nextOpen;
+    applyMobileMenuState();
+}
+function syncMobileMenuForViewport() {
+    if (!mobileMenuMediaQuery.matches) {
+        isMobileMenuOpen = false;
+    }
+    applyMobileMenuState();
+}
 async function refreshCache() {
     const bundledCache = await loadBundledCache();
     const storedCache = getStoredCache();
@@ -1114,12 +1178,13 @@ async function refreshCache() {
         ? bundledCache
         : storedCache;
     applyRawData(baseCache.territoryRaw, baseCache.locationRaw, baseCache.mapData);
-    setStoredCache(baseCache);
+    const cacheStoreError = setStoredCache(baseCache);
     const pathSummary = paths.length > 0 ? `, ${paths.length.toLocaleString()} paths` : "";
     const wikiSummary = baseCache.mapData?.stats && baseCache.mapData.stats.wikiCoordinateCount > 0
         ? `, ${baseCache.mapData.stats.wikiCoordinateCount.toLocaleString()} wiki coordinates`
         : "";
-    baseStatusMessage = `Loaded ${territories.length.toLocaleString()} territories, ${locations.length.toLocaleString()} points${pathSummary}${wikiSummary} from cached data (${formatDateTime(baseCache.updatedAt)}).`;
+    const cacheStoreSummary = cacheStoreError ? ` Browser cache save skipped: ${cacheStoreError}.` : "";
+    baseStatusMessage = `Loaded ${territories.length.toLocaleString()} territories, ${locations.length.toLocaleString()} points${pathSummary}${wikiSummary} from cached data (${formatDateTime(baseCache.updatedAt)}).${cacheStoreSummary}`;
     updateStatus();
     draw();
 }
@@ -1187,6 +1252,10 @@ canvas.addEventListener("wheel", (event) => {
 territoriesToggle.addEventListener("change", draw);
 locationsToggle.addEventListener("change", draw);
 pathsToggle.addEventListener("change", draw);
+outOfBoundsMarkersToggle.addEventListener("change", () => {
+    buildLegend();
+    draw();
+});
 locationLabelsToggle.addEventListener("change", draw);
 questSelect.addEventListener("change", () => {
     selectedQuestKey = questSelect.value;
@@ -1218,10 +1287,29 @@ legendToggleAllBtn.addEventListener("click", () => {
     }
     draw();
 });
+mobileMenuToggleBtn.addEventListener("click", () => {
+    setMobileMenuOpen(!isMobileMenuOpen);
+});
+mobileMenuCloseBtn.addEventListener("click", () => {
+    setMobileMenuOpen(false);
+});
+mobileMenuBackdrop.addEventListener("click", () => {
+    setMobileMenuOpen(false);
+});
 resetBtn.addEventListener("click", resetView);
-window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", () => {
+    syncMobileMenuForViewport();
+    resizeCanvas();
+});
+mobileMenuMediaQuery.addEventListener("change", syncMobileMenuForViewport);
+window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isMobileMenuOpen) {
+        setMobileMenuOpen(false);
+    }
+});
 updateLocationIconSizeLabel();
 setCoordinateReadout();
+syncMobileMenuForViewport();
 Promise.all([
     new Promise((resolve, reject) => {
         mapImage.onload = () => resolve();

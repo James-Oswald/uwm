@@ -13,7 +13,9 @@
     "dev": "tsc -w -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "serve": "python3 -m http.server 4173",
-    "update-cache": "node ./scripts/update-cache.mjs",
+    "scrape:wiki": "node ./scripts/wiki-backup.mjs",
+    "build:cache": "node ./scripts/build-cache.mjs",
+    "update-cache": "npm run scrape:wiki && npm run build:cache",
     "test:jest": "jest",
     "test": "npm run build && node --test test/*.test.mjs"
   }
