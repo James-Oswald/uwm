@@ -90,6 +90,8 @@ let territories: OverlayTerritory[] = [];
 let locations: OverlayPoint[] = [];
 let bounds = { ...MAP_WORLD_BOUNDS };
 let hoveredLabel = "";
+let viewportWidth = 0;
+let viewportHeight = 0;
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -182,6 +184,38 @@ function normalizeLocations(locationRaw: unknown): LocationData[] {
     collected.push({ name, icon, x: parsedX, z: parsedZ });
   };
 
+  const pushFromTuple = (name: string, icon: string, tuple: unknown[]): void => {
+    if (tuple.length < 2) {
+      return;
+    }
+    if (tuple.length >= 3) {
+      pushCandidate(name, icon, tuple[0], tuple[2]);
+      return;
+    }
+    pushCandidate(name, icon, tuple[0], tuple[1]);
+  };
+
+  const pushFromCoordinateString = (name: string, icon: string, rawValue: unknown): void => {
+    if (typeof rawValue !== "string") {
+      return;
+    }
+    const parts = rawValue
+      .split(/[,\s/]+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => Number(part));
+
+    if (parts.some((part) => !Number.isFinite(part)) || parts.length < 2) {
+      return;
+    }
+
+    if (parts.length >= 3) {
+      pushCandidate(name, icon, parts[0], parts[2]);
+      return;
+    }
+    pushCandidate(name, icon, parts[0], parts[1]);
+  };
+
   const visit = (value: unknown, fallbackName: string): void => {
     if (Array.isArray(value)) {
       for (const item of value) {
@@ -198,15 +232,44 @@ function normalizeLocations(locationRaw: unknown): LocationData[] {
     const name = typeof obj.name === "string" ? obj.name : fallbackName;
     const icon = typeof obj.icon === "string" ? obj.icon : "marker";
 
-    if (Array.isArray(obj.coords) && obj.coords.length >= 2) {
-      pushCandidate(name, icon, obj.coords[0], obj.coords[1]);
+    if (Array.isArray(obj.coords)) {
+      pushFromTuple(name, icon, obj.coords);
     }
-    if ("x" in obj && ("z" in obj || "y" in obj)) {
-      pushCandidate(name, icon, obj.x, obj.z ?? obj.y);
+    if (Array.isArray(obj.coordinates)) {
+      pushFromTuple(name, icon, obj.coordinates);
+    }
+    if ("x" in obj && "z" in obj) {
+      pushCandidate(name, icon, obj.x, obj.z);
+    } else if ("x" in obj && "y" in obj) {
+      pushCandidate(name, icon, obj.x, obj.y);
+    } else if ("latitude" in obj && "longitude" in obj) {
+      pushCandidate(name, icon, obj.longitude, obj.latitude);
+    }
+
+    pushFromCoordinateString(name, icon, obj.coord);
+    pushFromCoordinateString(name, icon, obj.coords);
+    pushFromCoordinateString(name, icon, obj.location);
+    pushFromCoordinateString(name, icon, obj.position);
+
+    if (Array.isArray(obj.location)) {
+      pushFromTuple(name, icon, obj.location);
     }
 
     for (const [key, nested] of Object.entries(obj)) {
-      if (key === "name" || key === "icon" || key === "x" || key === "z" || key === "y" || key === "coords") {
+      if (
+        key === "name" ||
+        key === "icon" ||
+        key === "x" ||
+        key === "z" ||
+        key === "y" ||
+        key === "coords" ||
+        key === "coord" ||
+        key === "coordinates" ||
+        key === "location" ||
+        key === "position" ||
+        key === "latitude" ||
+        key === "longitude"
+      ) {
         continue;
       }
       visit(nested, key);
@@ -302,7 +365,7 @@ function getScaleToFitViewport(): number {
   if (!mapImage.width || !mapImage.height) {
     return 1;
   }
-  const fitScale = Math.min(canvas.width / mapImage.width, canvas.height / mapImage.height);
+  const fitScale = Math.min(viewportWidth / mapImage.width, viewportHeight / mapImage.height);
   return Math.max(0.1, fitScale);
 }
 
@@ -310,8 +373,8 @@ function resetView(): void {
   scale = getScaleToFitViewport();
   minScale = scale * 0.4;
   maxScale = scale * 10;
-  offsetX = (canvas.width - mapImage.width * scale) / 2;
-  offsetY = (canvas.height - mapImage.height * scale) / 2;
+  offsetX = (viewportWidth - mapImage.width * scale) / 2;
+  offsetY = (viewportHeight - mapImage.height * scale) / 2;
   draw();
 }
 
@@ -421,10 +484,10 @@ function drawHoverLabel(): void {
     return;
   }
   ctx.fillStyle = "rgba(0,0,0,0.75)";
-  ctx.fillRect(10, canvas.height - 36, Math.min(canvas.width - 20, 420), 26);
+  ctx.fillRect(10, viewportHeight - 36, Math.min(viewportWidth - 20, 420), 26);
   ctx.fillStyle = "#f8fafc";
   ctx.font = "13px sans-serif";
-  ctx.fillText(hoveredLabel, 16, canvas.height - 19);
+  ctx.fillText(hoveredLabel, 16, viewportHeight - 19);
 }
 
 function draw(): void {
@@ -442,11 +505,12 @@ function draw(): void {
 
 function resizeCanvas(): void {
   const dpr = window.devicePixelRatio || 1;
-  const cssWidth = canvas.clientWidth;
-  const cssHeight = canvas.clientHeight;
-  canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
-  canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  viewportWidth = Math.max(1, canvas.clientWidth);
+  viewportHeight = Math.max(1, canvas.clientHeight);
+  canvas.width = Math.max(1, Math.floor(viewportWidth * dpr));
+  canvas.height = Math.max(1, Math.floor(viewportHeight * dpr));
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
   resetView();
 }
 
@@ -507,7 +571,7 @@ async function refreshCache(forceRefresh: boolean): Promise<void> {
     `Loaded ${territories.length.toLocaleString()} territories and ${locations.length.toLocaleString()} locations from cached data (${formatDateTime(baseCache.updatedAt)}).`,
   );
 
-  const shouldRefresh = forceRefresh || isCacheStale(baseCache.updatedAt);
+  const shouldRefresh = forceRefresh || isCacheStale(baseCache.updatedAt) || locations.length === 0;
   if (!shouldRefresh) {
     return;
   }
