@@ -45,7 +45,10 @@ The refresh script is resilient: if one endpoint is unavailable, it keeps the pr
   - `https://api.wynncraft.com/v3/guild/list/territory`
   - `https://api.wynncraft.com/v3/guild/territory`
 - Map location endpoint candidates are tried in order:
+  - `https://api.wynncraft.com/v3/map/locations/markers`
   - `https://api.wynncraft.com/v3/map/locations`
   - `https://api.wynncraft.com/v3/map`
+- If those API routes are unavailable, the refresh script falls back to parsing the official map labels script for named place labels only:
+  - `https://map.wynncraft.com/js/labels.js`
 
 This fallback keeps the app resilient if the API path changes between versions.

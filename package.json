@@ -3,12 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.3.0",
+    "typescript": "^5.9.3"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -w -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "serve": "python3 -m http.server 4173",
     "update-cache": "node ./scripts/update-cache.mjs",
+    "test:jest": "jest",
     "test": "npm run build && node --test test/*.test.mjs"
   }
 }

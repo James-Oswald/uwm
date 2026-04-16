@@ -12,13 +12,40 @@
       <div class="controls">
         <label><input id="toggle-territories" type="checkbox" /> Territories</label>
         <label><input id="toggle-locations" type="checkbox" checked /> Important locations</label>
+        <label><input id="toggle-location-labels" type="checkbox" /> Location labels</label>
+        <label class="range-control" for="location-icon-size">
+          Icon size
+          <input id="location-icon-size" type="range" min="10" max="32" step="1" value="18" />
+          <output id="location-icon-size-value" for="location-icon-size">18px</output>
+        </label>
         <button id="reset-view" type="button">Reset view</button>
       </div>
       <p id="status" aria-live="polite">Loading map data...</p>
+      <div class="coord-readout" aria-live="polite">
+        <span class="coord-chip">
+          <strong>Map</strong>
+          <span id="mouse-world-coords">x --, z --</span>
+        </span>
+        <span class="coord-chip">
+          <strong>Image</strong>
+          <span id="mouse-image-coords">x --, y --</span>
+        </span>
+      </div>
     </header>
 
-    <main class="canvas-shell">
-      <canvas id="map-canvas" aria-label="Wynncraft interactive map"></canvas>
+    <main class="app-shell">
+      <aside class="side-menu" aria-label="Marker legend and filters">
+        <div class="side-menu-header">
+          <h2>Marker Legend</h2>
+          <button id="legend-toggle-all" type="button">Toggle all</button>
+        </div>
+        <p class="side-menu-copy">Filter map markers by type and use the legend to learn what each symbol means.</p>
+        <div id="marker-legend" class="legend-list"></div>
+      </aside>
+
+      <section class="canvas-shell">
+        <canvas id="map-canvas" aria-label="Wynncraft interactive map"></canvas>
+      </section>
     </main>
 
     <script type="module" src="./dist/main.js"></script>

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { expandBoundsToFitData, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt } from '../dist/alignment.js';
+import { expandBoundsToFitData, fitBoundsToAspect, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt } from '../dist/alignment.js';
 
 const bounds = {
   minX: -2200,
@@ -12,6 +12,12 @@ const bounds = {
 
 const imageWidth = 4096;
 const imageHeight = 4096;
+const imageRect = {
+  left: 79,
+  top: 29,
+  width: 4132,
+  height: 6418,
+};
 
 const close = (actual, expected, epsilon = 1e-6) => {
   assert.ok(Math.abs(actual - expected) <= epsilon, `expected ${actual} to be within ${epsilon} of ${expected}`);
@@ -28,6 +34,30 @@ test('world/image transforms are reversible for map bounds and center points', (
   for (const point of cases) {
     const image = worldToImage(point, bounds, imageWidth, imageHeight);
     const world = imageToWorld(image, bounds, imageWidth, imageHeight);
+    close(world.x, point.x);
+    close(world.z, point.z);
+  }
+});
+
+test('world/image transforms stay reversible when projecting into a content sub-rect', () => {
+  const calibratedBounds = {
+    minX: -2387,
+    maxX: 1682,
+    minZ: -6561,
+    maxZ: -242,
+  };
+  const cases = [
+    { x: calibratedBounds.minX, z: calibratedBounds.minZ },
+    { x: calibratedBounds.maxX, z: calibratedBounds.maxZ },
+    { x: -350, z: -3200 },
+  ];
+
+  for (const point of cases) {
+    const image = worldToImage(point, calibratedBounds, 4261, 6485, imageRect);
+    assert.ok(image.x >= imageRect.left && image.x <= imageRect.left + imageRect.width);
+    assert.ok(image.y >= imageRect.top && image.y <= imageRect.top + imageRect.height);
+
+    const world = imageToWorld(image, calibratedBounds, 4261, 6485, imageRect);
     close(world.x, point.x);
     close(world.z, point.z);
   }
@@ -101,4 +131,21 @@ test('expandBoundsToFitData keeps fallback when points are already inside', () =
 
   const expanded = expandBoundsToFitData(fallback, points, 10);
   assert.deepEqual(expanded, fallback);
+});
+
+test('fitBoundsToAspect expands the smaller axis to match the target image aspect ratio', () => {
+  const points = [
+    { x: -2291, z: -6561 },
+    { x: 1586, z: -242 },
+  ];
+
+  const fitted = fitBoundsToAspect(points, imageRect.width / imageRect.height, 0);
+  const width = fitted.maxX - fitted.minX;
+  const height = fitted.maxZ - fitted.minZ;
+
+  close(width / height, imageRect.width / imageRect.height, 1e-9);
+  assert.ok(fitted.minX <= -2291);
+  assert.ok(fitted.maxX >= 1586);
+  assert.equal(fitted.minZ, -6561);
+  assert.equal(fitted.maxZ, -242);
 });

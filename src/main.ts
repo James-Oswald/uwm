@@ -1,4 +1,4 @@
-import { expandBoundsToFitData, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
+import { fitBoundsToAspect, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
 import type { Vec2 } from "./alignment.js";
 
 type TerritoryData = {
@@ -24,6 +24,17 @@ type OverlayPoint = {
   name: string;
   icon: string;
   world: Vec2;
+};
+
+type MarkerVisual = {
+  key: string;
+  label: string;
+  description: string;
+  group: string;
+  fill: string;
+  stroke: string;
+  glyph: string;
+  shape: "circle" | "diamond" | "square" | "hex";
 };
 
 type OverlayTerritory = {
@@ -53,10 +64,26 @@ const EMPTY_CACHE_PAYLOAD: CachedPayload = {
 };
 
 const MAP_WORLD_BOUNDS = {
-  minX: -2200,
-  maxX: 2200,
-  minZ: -5600,
-  maxZ: 2200,
+  minX: -2387,
+  maxX: 1682,
+  minZ: -6561,
+  maxZ: -242,
+};
+
+// The source PNG includes transparent padding around the actual rendered map.
+// Project overlays into the opaque map content box, not the full bitmap area.
+const MAP_IMAGE_CONTENT_BOX = {
+  left: 79,
+  top: 29,
+  width: 4132,
+  height: 6418,
+};
+
+// Empirical nudge after calibrating against the topographic image.
+// Positive X moves overlays right; negative Y moves overlays up.
+const MAP_OVERLAY_IMAGE_OFFSET = {
+  x: 53,
+  y: -60,
 };
 
 const colorCache = new Map<string, string>();
@@ -64,6 +91,13 @@ const colorCache = new Map<string, string>();
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const territoriesToggle = document.querySelector<HTMLInputElement>("#toggle-territories")!;
 const locationsToggle = document.querySelector<HTMLInputElement>("#toggle-locations")!;
+const locationLabelsToggle = document.querySelector<HTMLInputElement>("#toggle-location-labels")!;
+const locationIconSizeInput = document.querySelector<HTMLInputElement>("#location-icon-size")!;
+const locationIconSizeValue = document.querySelector<HTMLOutputElement>("#location-icon-size-value")!;
+const markerLegend = document.querySelector<HTMLDivElement>("#marker-legend")!;
+const legendToggleAllBtn = document.querySelector<HTMLButtonElement>("#legend-toggle-all")!;
+const mouseWorldCoordsEl = document.querySelector<HTMLSpanElement>("#mouse-world-coords")!;
+const mouseImageCoordsEl = document.querySelector<HTMLSpanElement>("#mouse-image-coords")!;
 const resetBtn = document.querySelector<HTMLButtonElement>("#reset-view")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 
@@ -88,6 +122,472 @@ let bounds = { ...MAP_WORLD_BOUNDS };
 let hoveredLabel = "";
 let viewportWidth = 0;
 let viewportHeight = 0;
+let devicePixelRatioScale = 1;
+let locationIconSize = Number(locationIconSizeInput.value) || 18;
+let lastPointerWorld: { x: number; z: number } | null = null;
+let lastPointerImage: { x: number; y: number } | null = null;
+const enabledMarkerTypes = new Set<string>();
+
+const MARKER_TYPE_ORDER = [
+  "quest",
+  "bank",
+  "travel-fast",
+  "travel-seaskipper",
+  "travel-balloon",
+  "merchant",
+  "identifier",
+  "station",
+  "cave",
+  "dungeon",
+  "altar",
+  "potion",
+  "misc",
+] as const;
+
+const MARKER_GROUP_ORDER = [
+  "activities",
+  "travel",
+  "vendors",
+  "services",
+  "crafting",
+  "hazards",
+  "other",
+] as const;
+
+const MARKER_GROUP_META: Record<string, { label: string; description: string }> = {
+  activities: {
+    label: "Activities",
+    description: "Quest-related objectives and progression markers",
+  },
+  travel: {
+    label: "Travel",
+    description: "Fast travel, sea travel, and other transit points",
+  },
+  vendors: {
+    label: "Vendors",
+    description: "Banks, merchants, and shopping-related services",
+  },
+  services: {
+    label: "Services",
+    description: "Identifiers and other utility NPCs",
+  },
+  crafting: {
+    label: "Crafting",
+    description: "Profession stations and production areas",
+  },
+  hazards: {
+    label: "Hazards",
+    description: "Caves, dungeons, altars, and raid content",
+  },
+  other: {
+    label: "Other",
+    description: "Everything else that does not fit a main group",
+  },
+};
+
+function worldToMapImage(point: Vec2): { x: number; y: number } {
+  const image = worldToImage(point, bounds, mapImage.width, mapImage.height, MAP_IMAGE_CONTENT_BOX);
+  return {
+    x: image.x + MAP_OVERLAY_IMAGE_OFFSET.x,
+    y: image.y + MAP_OVERLAY_IMAGE_OFFSET.y,
+  };
+}
+
+function mapImageToWorld(point: { x: number; y: number }): { x: number; z: number } {
+  return imageToWorld(
+    {
+      x: point.x - MAP_OVERLAY_IMAGE_OFFSET.x,
+      y: point.y - MAP_OVERLAY_IMAGE_OFFSET.y,
+    },
+    bounds,
+    mapImage.width,
+    mapImage.height,
+    MAP_IMAGE_CONTENT_BOX,
+  );
+}
+
+function updateLocationIconSizeLabel(): void {
+  locationIconSizeValue.value = `${locationIconSize}px`;
+  locationIconSizeValue.textContent = `${locationIconSize}px`;
+}
+
+function setCoordinateReadout(world?: { x: number; z: number }, image?: { x: number; y: number }): void {
+  if (!world || !image) {
+    lastPointerWorld = null;
+    lastPointerImage = null;
+    mouseWorldCoordsEl.textContent = "x --, z --";
+    mouseImageCoordsEl.textContent = "x --, y --";
+    return;
+  }
+
+  lastPointerWorld = world;
+  lastPointerImage = image;
+  mouseWorldCoordsEl.textContent = `x ${Math.round(world.x)}, z ${Math.round(world.z)}`;
+  mouseImageCoordsEl.textContent = `x ${Math.round(image.x)}, y ${Math.round(image.y)}`;
+}
+
+async function copyCurrentCoordinates(): Promise<void> {
+  if (!lastPointerWorld || !lastPointerImage) {
+    setStatus("Move the mouse over the map before copying coordinates.");
+    return;
+  }
+
+  const payload =
+    `Map: x ${Math.round(lastPointerWorld.x)}, z ${Math.round(lastPointerWorld.z)}\n` +
+    `Image: x ${Math.round(lastPointerImage.x)}, y ${Math.round(lastPointerImage.y)}`;
+
+  try {
+    await navigator.clipboard.writeText(payload);
+    setStatus(`Copied calibration coordinates. Press "c" over the map to copy again.`);
+  } catch {
+    setStatus("Could not copy coordinates to the clipboard.");
+  }
+}
+
+function classifyMarkerVisual(location: OverlayPoint): MarkerVisual {
+  const icon = location.icon.toLowerCase();
+  const name = location.name.toLowerCase();
+
+  if (icon.includes("quest") || name.includes("quest")) {
+    return {
+      key: "quest",
+      label: "Quests",
+      description: "Quest starts and mini quests",
+      group: "activities",
+      fill: "#8b5cf6",
+      stroke: "#f5ebff",
+      glyph: "?",
+      shape: "circle",
+    };
+  }
+  if (icon.includes("emerald") || name.includes("bank") || name.includes("emerald merchant")) {
+    return {
+      key: "bank",
+      label: "Banks",
+      description: "Banks and emerald merchants",
+      group: "vendors",
+      fill: "#22c55e",
+      stroke: "#ecfdf5",
+      glyph: "◆",
+      shape: "diamond",
+    };
+  }
+  if (icon.includes("potion")) {
+    return {
+      key: "potion",
+      label: "Potions",
+      description: "Potion and liquid merchants",
+      group: "vendors",
+      fill: "#ef4444",
+      stroke: "#fff1f2",
+      glyph: "!",
+      shape: "circle",
+    };
+  }
+  if (icon.includes("fasttravel") || name === "fast travel") {
+    return {
+      key: "travel-fast",
+      label: "Fast Travel",
+      description: "Direct fast-travel points",
+      group: "travel",
+      fill: "#0ea5e9",
+      stroke: "#eff6ff",
+      glyph: "✦",
+      shape: "square",
+    };
+  }
+  if (icon.includes("seaskipper") || name.includes("seaskipper") || name.includes("sea skipper")) {
+    return {
+      key: "travel-seaskipper",
+      label: "Sea Skipper",
+      description: "Sea skipper travel routes",
+      group: "travel",
+      fill: "#0284c7",
+      stroke: "#e0f2fe",
+      glyph: "⚓",
+      shape: "square",
+    };
+  }
+  if (icon.includes("housingairballoon") || name.includes("balloon")) {
+    return {
+      key: "travel-balloon",
+      label: "Housing Balloon",
+      description: "Housing air balloon transport",
+      group: "travel",
+      fill: "#7dd3fc",
+      stroke: "#f0f9ff",
+      glyph: "◌",
+      shape: "circle",
+    };
+  }
+  if (icon.includes("blacksmith") || icon.includes("weapon") || icon.includes("armour") || name.includes("merchant")) {
+    return {
+      key: "merchant",
+      label: "Vendors",
+      description: "Shops, buyers, scroll merchants, and general vendors",
+      group: "vendors",
+      fill: "#f59e0b",
+      stroke: "#fffbeb",
+      glyph: "$",
+      shape: "square",
+    };
+  }
+  if (icon.includes("identifier")) {
+    return {
+      key: "identifier",
+      label: "Identifiers",
+      description: "Item identifiers and related services",
+      group: "services",
+      fill: "#14b8a6",
+      stroke: "#f0fdfa",
+      glyph: "i",
+      shape: "circle",
+    };
+  }
+  if (icon.includes("profession") || name.includes("station")) {
+    return {
+      key: "station",
+      label: "Stations",
+      description: "Profession crafting stations",
+      group: "crafting",
+      fill: "#06b6d4",
+      stroke: "#ecfeff",
+      glyph: "●",
+      shape: "hex",
+    };
+  }
+  if (icon.includes("cave") || name === "cave") {
+    return {
+      key: "cave",
+      label: "Caves",
+      description: "Caves and cave entrances",
+      group: "hazards",
+      fill: "#78716c",
+      stroke: "#fafaf9",
+      glyph: "▲",
+      shape: "hex",
+    };
+  }
+  if (icon.includes("dungeon") || name.includes("dungeon")) {
+    return {
+      key: "dungeon",
+      label: "Dungeons",
+      description: "Dungeon entrances and dungeon merchants",
+      group: "hazards",
+      fill: "#475569",
+      stroke: "#f8fafc",
+      glyph: "☠",
+      shape: "hex",
+    };
+  }
+  if (icon.includes("raid") || icon.includes("bossaltar") || icon.includes("corrupteddungeon") || name.includes("altar")) {
+    return {
+      key: "altar",
+      label: "Altars & Raids",
+      description: "Boss altars, corrupted dungeons, and raids",
+      group: "hazards",
+      fill: "#991b1b",
+      stroke: "#fee2e2",
+      glyph: "✦",
+      shape: "hex",
+    };
+  }
+
+  return {
+    key: "misc",
+    label: "Other",
+    description: "Everything else",
+    group: "other",
+    fill: "#facc15",
+    stroke: "#111827",
+    glyph: "•",
+    shape: "circle",
+  };
+}
+
+function drawMarkerShape(screenX: number, screenY: number, size: number, visual: MarkerVisual): void {
+  const radius = size / 2;
+  ctx.beginPath();
+
+  switch (visual.shape) {
+    case "diamond":
+      ctx.moveTo(screenX, screenY - radius);
+      ctx.lineTo(screenX + radius, screenY);
+      ctx.lineTo(screenX, screenY + radius);
+      ctx.lineTo(screenX - radius, screenY);
+      ctx.closePath();
+      break;
+    case "square":
+      ctx.rect(screenX - radius, screenY - radius, size, size);
+      break;
+    case "hex": {
+      for (let i = 0; i < 6; i += 1) {
+        const angle = Math.PI / 6 + (i * Math.PI) / 3;
+        const x = screenX + Math.cos(angle) * radius;
+        const y = screenY + Math.sin(angle) * radius;
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.closePath();
+      break;
+    }
+    default:
+      ctx.arc(screenX, screenY, Math.max(3, radius), 0, Math.PI * 2);
+      break;
+  }
+
+  ctx.fillStyle = visual.fill;
+  ctx.strokeStyle = visual.stroke;
+  ctx.lineWidth = Math.max(1.25, size * 0.08);
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawMarkerGlyph(screenX: number, screenY: number, size: number, visual: MarkerVisual): void {
+  ctx.fillStyle = visual.stroke;
+  ctx.font = `700 ${Math.max(8, size * 0.7)}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(visual.glyph, screenX, screenY + size * 0.02);
+}
+
+function isMarkerTypeEnabled(typeKey: string): boolean {
+  return enabledMarkerTypes.size === 0 || enabledMarkerTypes.has(typeKey);
+}
+
+function buildLegend(): void {
+  const counts = new Map<string, { visual: MarkerVisual; count: number }>();
+
+  for (const location of locations) {
+    const visual = classifyMarkerVisual(location);
+    const current = counts.get(visual.key);
+    if (current) {
+      current.count += 1;
+    } else {
+      counts.set(visual.key, { visual, count: 1 });
+    }
+  }
+
+  const entries = [...counts.values()].sort((a, b) => {
+    const orderA = MARKER_TYPE_ORDER.indexOf(a.visual.key as (typeof MARKER_TYPE_ORDER)[number]);
+    const orderB = MARKER_TYPE_ORDER.indexOf(b.visual.key as (typeof MARKER_TYPE_ORDER)[number]);
+    const normalizedA = orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA;
+    const normalizedB = orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB;
+    return normalizedA - normalizedB || a.visual.label.localeCompare(b.visual.label);
+  });
+
+  if (enabledMarkerTypes.size === 0) {
+    for (const entry of entries) {
+      enabledMarkerTypes.add(entry.visual.key);
+    }
+  }
+
+  const grouped = new Map<string, typeof entries>();
+  for (const entry of entries) {
+    const groupEntries = grouped.get(entry.visual.group);
+    if (groupEntries) {
+      groupEntries.push(entry);
+    } else {
+      grouped.set(entry.visual.group, [entry]);
+    }
+  }
+
+  markerLegend.replaceChildren();
+
+  const orderedGroups = [...grouped.entries()].sort((a, b) => {
+    const orderA = MARKER_GROUP_ORDER.indexOf(a[0] as (typeof MARKER_GROUP_ORDER)[number]);
+    const orderB = MARKER_GROUP_ORDER.indexOf(b[0] as (typeof MARKER_GROUP_ORDER)[number]);
+    const normalizedA = orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA;
+    const normalizedB = orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB;
+    return normalizedA - normalizedB;
+  });
+
+  for (const [groupKey, groupEntries] of orderedGroups) {
+    const details = document.createElement("details");
+    details.className = "legend-group";
+    details.open = true;
+
+    const summary = document.createElement("summary");
+    summary.className = "legend-group-summary";
+
+    const groupMeta = document.createElement("span");
+    groupMeta.className = "legend-group-meta";
+
+    const groupName = document.createElement("span");
+    groupName.className = "legend-group-name";
+    groupName.textContent = MARKER_GROUP_META[groupKey]?.label ?? groupKey;
+
+    const groupDescription = document.createElement("span");
+    groupDescription.className = "legend-group-desc";
+    groupDescription.textContent = MARKER_GROUP_META[groupKey]?.description ?? "";
+
+    groupMeta.append(groupName, groupDescription);
+
+    const groupCount = document.createElement("span");
+    groupCount.className = "legend-group-count";
+    groupCount.textContent = groupEntries.reduce((sum, entry) => sum + entry.count, 0).toLocaleString();
+
+    summary.append(groupMeta, groupCount);
+    details.append(summary);
+
+    const groupList = document.createElement("div");
+    groupList.className = "legend-group-list";
+
+    for (const entry of groupEntries) {
+      const row = document.createElement("label");
+      row.className = "legend-item";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.typeKey = entry.visual.key;
+      checkbox.checked = enabledMarkerTypes.has(entry.visual.key);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          enabledMarkerTypes.add(entry.visual.key);
+        } else {
+          enabledMarkerTypes.delete(entry.visual.key);
+        }
+        draw();
+      });
+
+      const symbol = document.createElement("span");
+      symbol.className = `legend-symbol shape-${entry.visual.shape}`;
+      symbol.style.background = entry.visual.fill;
+      symbol.style.border = `2px solid ${entry.visual.stroke}`;
+      symbol.style.color = entry.visual.stroke;
+
+      const symbolText = document.createElement("span");
+      symbolText.textContent = entry.visual.glyph;
+      symbol.append(symbolText);
+
+      const meta = document.createElement("span");
+      meta.className = "legend-meta";
+
+      const name = document.createElement("span");
+      name.className = "legend-name";
+      name.textContent = entry.visual.label;
+
+      const description = document.createElement("span");
+      description.className = "legend-desc";
+      description.textContent = entry.visual.description;
+
+      meta.append(name, description);
+
+      const count = document.createElement("span");
+      count.className = "legend-count";
+      count.textContent = entry.count.toLocaleString();
+
+      row.append(checkbox, symbol, meta, count);
+      groupList.append(row);
+    }
+
+    details.append(groupList);
+    markerLegend.append(details);
+  }
+}
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -299,6 +799,7 @@ function applyRawData(territoryRaw: unknown, locationRaw: unknown): void {
     }));
 
   updateWorldBounds();
+  buildLegend();
 }
 
 function formatDateTime(isoDate: string): string {
@@ -319,15 +820,15 @@ function updateWorldBounds(): void {
     points.push(location.world);
   }
 
-  bounds = expandBoundsToFitData(MAP_WORLD_BOUNDS, points);
+  bounds = fitBoundsToAspect(points, MAP_IMAGE_CONTENT_BOX.width / MAP_IMAGE_CONTENT_BOX.height, 0, MAP_WORLD_BOUNDS);
 }
 
 
 function getScaleToFitViewport(): number {
-  if (!mapImage.width || !mapImage.height) {
+  if (!MAP_IMAGE_CONTENT_BOX.width || !MAP_IMAGE_CONTENT_BOX.height) {
     return 1;
   }
-  const fitScale = Math.min(viewportWidth / mapImage.width, viewportHeight / mapImage.height);
+  const fitScale = Math.min(viewportWidth / MAP_IMAGE_CONTENT_BOX.width, viewportHeight / MAP_IMAGE_CONTENT_BOX.height);
   return Math.max(0.1, fitScale);
 }
 
@@ -335,8 +836,8 @@ function resetView(): void {
   scale = getScaleToFitViewport();
   minScale = scale * 0.4;
   maxScale = scale * 10;
-  offsetX = (viewportWidth - mapImage.width * scale) / 2;
-  offsetY = (viewportHeight - mapImage.height * scale) / 2;
+  offsetX = (viewportWidth - MAP_IMAGE_CONTENT_BOX.width * scale) / 2 - MAP_IMAGE_CONTENT_BOX.left * scale;
+  offsetY = (viewportHeight - MAP_IMAGE_CONTENT_BOX.height * scale) / 2 - MAP_IMAGE_CONTENT_BOX.top * scale;
   draw();
 }
 
@@ -374,13 +875,13 @@ function drawTerritories(): void {
   }
 
   for (const territory of territories) {
-    const start = worldToImage(territory.start, bounds, mapImage.width, mapImage.height);
-    const end = worldToImage(territory.end, bounds, mapImage.width, mapImage.height);
+    const projectedStart = worldToMapImage(territory.start);
+    const projectedEnd = worldToMapImage(territory.end);
 
-    const left = Math.min(start.x, end.x);
-    const top = Math.min(start.y, end.y);
-    const width = Math.abs(end.x - start.x);
-    const height = Math.abs(end.y - start.y);
+    const left = Math.min(projectedStart.x, projectedEnd.x);
+    const top = Math.min(projectedStart.y, projectedEnd.y);
+    const width = Math.abs(projectedEnd.x - projectedStart.x);
+    const height = Math.abs(projectedEnd.y - projectedStart.y);
 
     const screen = imageToScreen({ x: left, y: top }, { scale, offsetX, offsetY });
     const screenWidth = width * scale;
@@ -416,25 +917,25 @@ function drawLocations(): void {
     return;
   }
 
-  const radius = Math.max(2, Math.min(7, scale * 0.8));
-  ctx.fillStyle = "#ffd56b";
-  ctx.strokeStyle = "#101417";
-  ctx.lineWidth = 1;
+  const iconSize = Math.max(8, Math.min(48, locationIconSize));
+  const halfIconSize = iconSize / 2;
 
   for (const location of locations) {
-    const image = worldToImage(location.world, bounds, mapImage.width, mapImage.height);
+    const image = worldToMapImage(location.world);
     const screen = imageToScreen(image, { scale, offsetX, offsetY });
+    const visual = classifyMarkerVisual(location);
+    if (!isMarkerTypeEnabled(visual.key)) {
+      continue;
+    }
+    drawMarkerShape(screen.x, screen.y, iconSize, visual);
+    drawMarkerGlyph(screen.x, screen.y, iconSize, visual);
 
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    if (scale > minScale * 2.1) {
+    if (locationLabelsToggle.checked && scale > minScale * 2.1) {
       ctx.fillStyle = "#f1f5f9";
       ctx.font = `${Math.max(10, Math.min(14, scale * 0.9))}px sans-serif`;
-      ctx.fillText(location.name, screen.x + radius + 3, screen.y - radius - 1);
-      ctx.fillStyle = "#ffd56b";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(location.name, screen.x + halfIconSize + 4, screen.y - halfIconSize);
     }
   }
 }
@@ -451,7 +952,9 @@ function drawHoverLabel(): void {
 }
 
 function draw(): void {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(devicePixelRatioScale, 0, 0, devicePixelRatioScale, 0, 0);
 
   if (!mapImage.width || !mapImage.height) {
     return;
@@ -465,31 +968,37 @@ function draw(): void {
 
 function resizeCanvas(): void {
   const dpr = window.devicePixelRatio || 1;
+  devicePixelRatioScale = dpr;
   viewportWidth = Math.max(1, canvas.clientWidth);
   viewportHeight = Math.max(1, canvas.clientHeight);
   canvas.width = Math.max(1, Math.floor(viewportWidth * dpr));
   canvas.height = Math.max(1, Math.floor(viewportHeight * dpr));
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.scale(dpr, dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   resetView();
 }
 
 function screenToWorld(screenX: number, screenY: number): { x: number; z: number } {
   const imagePoint = screenToImage({ x: screenX, y: screenY }, { scale, offsetX, offsetY });
-  return imageToWorld(imagePoint, bounds, mapImage.width, mapImage.height);
+  return mapImageToWorld(imagePoint);
 }
 
 function updateHover(clientX: number, clientY: number): void {
   const rect = canvas.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;
+  const image = screenToImage({ x, y }, { scale, offsetX, offsetY });
   const world = screenToWorld(x, y);
+  setCoordinateReadout(world, image);
 
   let bestDistance = Infinity;
   let bestName = "";
 
   if (locationsToggle.checked) {
     for (const location of locations) {
+      const visual = classifyMarkerVisual(location);
+      if (!isMarkerTypeEnabled(visual.key)) {
+        continue;
+      }
       const dx = location.world.x - world.x;
       const dz = location.world.z - world.z;
       const distance = Math.hypot(dx, dz);
@@ -560,6 +1069,29 @@ canvas.addEventListener("pointercancel", (event) => {
   canvas.releasePointerCapture(event.pointerId);
 });
 
+canvas.addEventListener("pointerleave", () => {
+  hoveredLabel = "";
+  setCoordinateReadout();
+  draw();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+  if (event.key.toLowerCase() !== "c") {
+    return;
+  }
+
+  const activeTag = document.activeElement instanceof HTMLElement ? document.activeElement.tagName : "";
+  if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") {
+    return;
+  }
+
+  event.preventDefault();
+  void copyCurrentCoordinates();
+});
+
 canvas.addEventListener(
   "wheel",
   (event) => {
@@ -577,8 +1109,32 @@ canvas.addEventListener(
 
 territoriesToggle.addEventListener("change", draw);
 locationsToggle.addEventListener("change", draw);
+locationLabelsToggle.addEventListener("change", draw);
+locationIconSizeInput.addEventListener("input", () => {
+  locationIconSize = Number(locationIconSizeInput.value) || 18;
+  updateLocationIconSizeLabel();
+  draw();
+});
+legendToggleAllBtn.addEventListener("click", () => {
+  const checkboxes = markerLegend.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  const shouldEnableAll = [...checkboxes].some((checkbox) => !checkbox.checked);
+  enabledMarkerTypes.clear();
+  for (const checkbox of checkboxes) {
+    checkbox.checked = shouldEnableAll;
+    if (shouldEnableAll) {
+      const typeKey = checkbox.dataset.typeKey;
+      if (typeKey) {
+        enabledMarkerTypes.add(typeKey);
+      }
+    }
+  }
+  draw();
+});
 resetBtn.addEventListener("click", resetView);
 window.addEventListener("resize", resizeCanvas);
+
+updateLocationIconSizeLabel();
+setCoordinateReadout();
 
 Promise.all([
   new Promise<void>((resolve, reject) => {

@@ -8,6 +8,7 @@ export type Bounds = {
 };
 
 export type ImagePoint = { x: number; y: number };
+export type ImageRect = { left: number; top: number; width: number; height: number };
 
 export type ViewState = {
   scale: number;
@@ -15,19 +16,37 @@ export type ViewState = {
   offsetY: number;
 };
 
-export function worldToImage(point: Vec2, bounds: Bounds, imageWidth: number, imageHeight: number): ImagePoint {
+function resolveImageRect(imageWidth: number, imageHeight: number, imageRect?: ImageRect): ImageRect {
+  return imageRect ?? { left: 0, top: 0, width: imageWidth, height: imageHeight };
+}
+
+export function worldToImage(
+  point: Vec2,
+  bounds: Bounds,
+  imageWidth: number,
+  imageHeight: number,
+  imageRect?: ImageRect,
+): ImagePoint {
+  const rect = resolveImageRect(imageWidth, imageHeight, imageRect);
   const xRatio = (point.x - bounds.minX) / (bounds.maxX - bounds.minX);
   const zRatio = (point.z - bounds.minZ) / (bounds.maxZ - bounds.minZ);
 
   return {
-    x: xRatio * imageWidth,
-    y: zRatio * imageHeight,
+    x: rect.left + xRatio * rect.width,
+    y: rect.top + zRatio * rect.height,
   };
 }
 
-export function imageToWorld(point: ImagePoint, bounds: Bounds, imageWidth: number, imageHeight: number): Vec2 {
-  const x = bounds.minX + (point.x / imageWidth) * (bounds.maxX - bounds.minX);
-  const z = bounds.minZ + (point.y / imageHeight) * (bounds.maxZ - bounds.minZ);
+export function imageToWorld(
+  point: ImagePoint,
+  bounds: Bounds,
+  imageWidth: number,
+  imageHeight: number,
+  imageRect?: ImageRect,
+): Vec2 {
+  const rect = resolveImageRect(imageWidth, imageHeight, imageRect);
+  const x = bounds.minX + ((point.x - rect.left) / rect.width) * (bounds.maxX - bounds.minX);
+  const z = bounds.minZ + ((point.y - rect.top) / rect.height) * (bounds.maxZ - bounds.minZ);
   return { x, z };
 }
 
@@ -89,4 +108,69 @@ export function expandBoundsToFitData(fallback: Bounds, points: Vec2[], padding 
     minZ: Math.min(fallback.minZ, minZ - padding),
     maxZ: Math.max(fallback.maxZ, maxZ + padding),
   };
+}
+
+export function fitBoundsToAspect(points: Vec2[], targetAspectRatio: number, padding = 32, fallback?: Bounds): Bounds {
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.z)) {
+      continue;
+    }
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minZ = Math.min(minZ, point.z);
+    maxZ = Math.max(maxZ, point.z);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minZ) || !Number.isFinite(maxZ)) {
+    if (fallback) {
+      return fallback;
+    }
+    return {
+      minX: 0,
+      maxX: 1,
+      minZ: 0,
+      maxZ: 1,
+    };
+  }
+
+  minX -= padding;
+  maxX += padding;
+  minZ -= padding;
+  maxZ += padding;
+
+  let width = maxX - minX;
+  let height = maxZ - minZ;
+
+  if (width <= 0) {
+    width = 1;
+    minX -= 0.5;
+    maxX += 0.5;
+  }
+  if (height <= 0) {
+    height = 1;
+    minZ -= 0.5;
+    maxZ += 0.5;
+  }
+
+  if (Number.isFinite(targetAspectRatio) && targetAspectRatio > 0) {
+    const currentAspectRatio = width / height;
+    if (currentAspectRatio < targetAspectRatio) {
+      const nextWidth = height * targetAspectRatio;
+      const delta = (nextWidth - width) / 2;
+      minX -= delta;
+      maxX += delta;
+    } else if (currentAspectRatio > targetAspectRatio) {
+      const nextHeight = width / targetAspectRatio;
+      const delta = (nextHeight - height) / 2;
+      minZ -= delta;
+      maxZ += delta;
+    }
+  }
+
+  return { minX, maxX, minZ, maxZ };
 }

@@ -36,6 +36,30 @@ body {
   font-size: 0.9rem;
 }
 
+.controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.range-control {
+  background: #17202a;
+  border: 1px solid #2b3948;
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.55rem;
+}
+
+.range-control input[type="range"] {
+  width: 8rem;
+}
+
+.range-control output {
+  min-width: 2.8rem;
+  color: #9db0c2;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .controls button {
   border: 1px solid #38485a;
   border-radius: 0.35rem;
@@ -54,6 +78,211 @@ body {
   color: #9db0c2;
 }
 
+.coord-readout {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-top: 0.55rem;
+}
+
+.coord-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: #17202a;
+  border: 1px solid #2b3948;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.86rem;
+  color: #dce5ee;
+}
+
+.coord-chip strong {
+  color: #8cc8ff;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+}
+
+.app-shell {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 19rem minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.side-menu {
+  border-right: 1px solid #29333f;
+  background: #0f151c;
+  padding: 0.9rem 0.85rem;
+  overflow-y: auto;
+}
+
+.side-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.side-menu-header h2 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.side-menu-header button {
+  border: 1px solid #38485a;
+  border-radius: 0.35rem;
+  background: #1b2530;
+  color: inherit;
+  padding: 0.28rem 0.55rem;
+  cursor: pointer;
+}
+
+.side-menu-copy {
+  margin: 0 0 0.8rem;
+  color: #8ca1b3;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.legend-group {
+  background: #111922;
+  border: 1px solid #243241;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.legend-group-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.7rem 0.8rem;
+  background: #15212b;
+}
+
+.legend-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.legend-group-summary::before {
+  content: "▸";
+  color: #8ca1b3;
+  margin-right: 0.45rem;
+  transition: transform 0.18s ease;
+}
+
+.legend-group[open] .legend-group-summary::before {
+  transform: rotate(90deg);
+}
+
+.legend-group-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.legend-group-name {
+  font-size: 0.92rem;
+  color: #eef2f6;
+}
+
+.legend-group-desc {
+  font-size: 0.76rem;
+  color: #8ca1b3;
+  margin-top: 0.08rem;
+}
+
+.legend-group-count {
+  color: #9db0c2;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.45rem 0.45rem 0.5rem 1rem;
+}
+
+.legend-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0.65rem;
+  background: #15202a;
+  border: 1px solid #243241;
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.65rem;
+}
+
+.legend-item input[type="checkbox"] {
+  margin: 0;
+}
+
+.legend-symbol {
+  width: 1.65rem;
+  height: 1.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+
+.legend-symbol.shape-diamond {
+  border-radius: 0.3rem;
+  transform: rotate(45deg);
+}
+
+.legend-symbol.shape-diamond span {
+  transform: rotate(-45deg);
+}
+
+.legend-symbol.shape-square {
+  border-radius: 0.35rem;
+}
+
+.legend-symbol.shape-hex {
+  clip-path: polygon(25% 6%, 75% 6%, 100% 50%, 75% 94%, 25% 94%, 0 50%);
+  border-radius: 0;
+}
+
+.legend-meta {
+  min-width: 0;
+}
+
+.legend-name {
+  display: block;
+  font-size: 0.9rem;
+  color: #e8edf3;
+}
+
+.legend-desc {
+  display: block;
+  font-size: 0.78rem;
+  color: #8ca1b3;
+  margin-top: 0.08rem;
+}
+
+.legend-count {
+  color: #9db0c2;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .canvas-shell {
   flex: 1;
   overflow: hidden;
@@ -69,4 +298,17 @@ body {
 
 #map-canvas.dragging {
   cursor: grabbing;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .side-menu {
+    border-right: none;
+    border-bottom: 1px solid #29333f;
+    max-height: 16rem;
+  }
 }
