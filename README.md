@@ -4,8 +4,8 @@ A fully client-side TypeScript web app that:
 
 - renders `TopographicMap.png` on an HTML canvas,
 - supports drag-to-pan and wheel-to-zoom,
-- fetches live Wynncraft data directly from the browser,
-- overlays guild territories and map locations.
+- overlays guild territories and map locations,
+- prefers cached data and gracefully falls back when live API requests are blocked by CORS.
 
 ## Run locally
 
@@ -16,9 +16,31 @@ npm run serve
 
 Then open `http://localhost:4173`.
 
-> This project has **no backend**. API calls happen directly in the browser to Wynncraft's public API.
+## Cache strategy (no backend required)
 
-## Notes
+Because this project is client-only, it now reads from `cache/wynn-data.json` first, then:
+
+1. Uses localStorage cache if present.
+2. Attempts a live refresh only when cache is older than 7 days (or when you click **Refresh cache**).
+3. Falls back to cached data if live refresh fails (CORS/404/network).
+
+## Refresh cache data from Node (recommended weekly)
+
+Use the script below in CI or cron to regenerate `cache/wynn-data.json`:
+
+```bash
+npm run update-cache
+```
+
+Suggested weekly cron (UTC Sundays at 02:00):
+
+```cron
+0 2 * * 0 cd /path/to/repo && npm ci && npm run update-cache
+```
+
+The refresh script is resilient: if one endpoint is unavailable, it keeps the previous cached value for that section.
+
+## Endpoint notes
 
 - Guild territory endpoint candidates are tried in order:
   - `https://api.wynncraft.com/v3/guild/list/territory`
