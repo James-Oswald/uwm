@@ -1,0 +1,45 @@
+name: Refresh Cached Data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-cache
+  cancel-in-progress: false
+
+jobs:
+  refresh-cache:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Refresh wiki backup and cache
+        run: npm run update-cache
+
+      - name: Commit refreshed cache files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cache/wynn-data.json cache/wiki-pages-backup.xml.gz
+          if git diff --cached --quiet; then
+            echo "No cache changes to commit."
+            exit 0
+          fi
+          git commit -m "Refresh cached map data"
+          git push origin HEAD:main

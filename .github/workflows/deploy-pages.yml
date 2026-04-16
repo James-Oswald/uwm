@@ -35,9 +35,6 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Update cache
-        run: npm run update-cache
-
       - name: Build
         run: npm run build
 

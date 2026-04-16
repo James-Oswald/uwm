@@ -45,9 +45,18 @@ npm run serve
 
 `build:cache` refreshes the official API data, reads the local wiki XML backup, and writes `cache/wynn-data.json`.
 
+`update-cache` runs both steps together, and is intended for manual cache refreshes rather than normal deploys.
+
+## Deployment behavior
+
+The GitHub Pages deploy workflow does not scrape the wiki or rebuild cache data.
+It publishes the committed `cache/wynn-data.json` and `cache/wiki-pages-backup.xml.gz` already in the repository so deploys stay fast and predictable.
+
+If you want fresh wiki-derived data, run the manual `Refresh Cached Data` GitHub Action first or run the scripts locally and commit the updated cache files.
+
 ## Refresh cache data from Node (recommended weekly)
 
-Use the scripts below in CI or cron to refresh the wiki backup and rebuild `cache/wynn-data.json`:
+Use the scripts below in a manual workflow or cron to refresh the wiki backup and rebuild `cache/wynn-data.json`:
 
 ```bash
 npm run scrape:wiki
@@ -59,6 +68,8 @@ Suggested weekly cron (UTC Sundays at 02:00):
 ```cron
 0 2 * * 0 cd /path/to/repo && npm ci && npm run scrape:wiki && npm run build:cache
 ```
+
+There is also a manual GitHub Actions workflow named `Refresh Cached Data` that runs `npm run update-cache` and commits any changed cache files back to `main`.
 
 The build step is resilient: if one source is unavailable, it keeps the previous cached value for that section and still rebuilds the normalized `mapData` layer from whatever data is available.
 
