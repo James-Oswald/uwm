@@ -35,16 +35,20 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Update cache
+        run: npm run update-cache
+
       - name: Build
         run: npm run build
 
       - name: Prepare site artifact
         run: |
-          mkdir -p _site/dist _site/src
+          mkdir -p _site/dist _site/src _site/cache
           cp index.html _site/
           cp src/styles.css _site/src/
           cp TopographicMap.png _site/
           cp dist/main.js _site/dist/
+          cp cache/wynn-data.json _site/cache/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
