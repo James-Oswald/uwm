@@ -1,4 +1,4 @@
-"use strict";
+import { expandBoundsToFitData, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
 const MAP_IMAGE_URL = "./TopographicMap.png";
 const API_ORIGIN = "https://api.wynncraft.com/v3";
 const TERRITORY_CANDIDATES = [`${API_ORIGIN}/guild/list/territory`, `${API_ORIGIN}/guild/territory`];
@@ -259,21 +259,14 @@ function formatDateTime(isoDate) {
     return parsed.toLocaleString();
 }
 function updateWorldBounds() {
-    bounds = { ...MAP_WORLD_BOUNDS };
-}
-function worldToImage(point) {
-    const xRatio = (point.x - bounds.minX) / (bounds.maxX - bounds.minX);
-    const zRatio = (point.z - bounds.minZ) / (bounds.maxZ - bounds.minZ);
-    return {
-        x: xRatio * mapImage.width,
-        y: zRatio * mapImage.height,
-    };
-}
-function imageToScreen(point) {
-    return {
-        x: point.x * scale + offsetX,
-        y: point.y * scale + offsetY,
-    };
+    const points = [];
+    for (const territory of territories) {
+        points.push(territory.start, territory.end);
+    }
+    for (const location of locations) {
+        points.push(location.world);
+    }
+    bounds = expandBoundsToFitData(MAP_WORLD_BOUNDS, points);
 }
 function getScaleToFitViewport() {
     if (!mapImage.width || !mapImage.height) {
@@ -295,11 +288,10 @@ function zoomAt(screenX, screenY, zoomMultiplier) {
     if (nextScale === scale) {
         return;
     }
-    const imageX = (screenX - offsetX) / scale;
-    const imageY = (screenY - offsetY) / scale;
-    scale = nextScale;
-    offsetX = screenX - imageX * scale;
-    offsetY = screenY - imageY * scale;
+    const nextView = zoomAtPoint({ x: screenX, y: screenY }, { scale, offsetX, offsetY }, nextScale);
+    scale = nextView.scale;
+    offsetX = nextView.offsetX;
+    offsetY = nextView.offsetY;
     draw();
 }
 function colorForGuild(prefix) {
@@ -320,13 +312,13 @@ function drawTerritories() {
         return;
     }
     for (const territory of territories) {
-        const start = worldToImage(territory.start);
-        const end = worldToImage(territory.end);
+        const start = worldToImage(territory.start, bounds, mapImage.width, mapImage.height);
+        const end = worldToImage(territory.end, bounds, mapImage.width, mapImage.height);
         const left = Math.min(start.x, end.x);
         const top = Math.min(start.y, end.y);
         const width = Math.abs(end.x - start.x);
         const height = Math.abs(end.y - start.y);
-        const screen = imageToScreen({ x: left, y: top });
+        const screen = imageToScreen({ x: left, y: top }, { scale, offsetX, offsetY });
         const screenWidth = width * scale;
         const screenHeight = height * scale;
         const fill = colorForGuild(territory.guildPrefix || territory.guildName || territory.name);
@@ -355,8 +347,8 @@ function drawLocations() {
     ctx.strokeStyle = "#101417";
     ctx.lineWidth = 1;
     for (const location of locations) {
-        const image = worldToImage(location.world);
-        const screen = imageToScreen(image);
+        const image = worldToImage(location.world, bounds, mapImage.width, mapImage.height);
+        const screen = imageToScreen(image, { scale, offsetX, offsetY });
         ctx.beginPath();
         ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
         ctx.fill();
@@ -400,11 +392,8 @@ function resizeCanvas() {
     resetView();
 }
 function screenToWorld(screenX, screenY) {
-    const imageX = (screenX - offsetX) / scale;
-    const imageY = (screenY - offsetY) / scale;
-    const x = bounds.minX + (imageX / mapImage.width) * (bounds.maxX - bounds.minX);
-    const z = bounds.minZ + (imageY / mapImage.height) * (bounds.maxZ - bounds.minZ);
-    return { x, z };
+    const imagePoint = screenToImage({ x: screenX, y: screenY }, { scale, offsetX, offsetY });
+    return imageToWorld(imagePoint, bounds, mapImage.width, mapImage.height);
 }
 function updateHover(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
@@ -462,16 +451,22 @@ async function refreshCache(forceRefresh) {
     }
 }
 canvas.addEventListener("pointerdown", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
     isDragging = true;
-    dragStartX = event.clientX - offsetX;
-    dragStartY = event.clientY - offsetY;
+    dragStartX = x - offsetX;
+    dragStartY = y - offsetY;
     canvas.classList.add("dragging");
     canvas.setPointerCapture(event.pointerId);
 });
 canvas.addEventListener("pointermove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
     if (isDragging) {
-        offsetX = event.clientX - dragStartX;
-        offsetY = event.clientY - dragStartY;
+        offsetX = x - dragStartX;
+        offsetY = y - dragStartY;
         draw();
     }
     else {

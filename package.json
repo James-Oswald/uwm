@@ -8,6 +8,7 @@
     "dev": "tsc -w -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "serve": "python3 -m http.server 4173",
-    "update-cache": "node ./scripts/update-cache.mjs"
+    "update-cache": "node ./scripts/update-cache.mjs",
+    "test": "npm run build && node --test test/*.test.mjs"
   }
 }
