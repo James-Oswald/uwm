@@ -39,6 +39,17 @@ type OverlayTerritory = { name: string; guildName: string; guildPrefix: string; 
 type CachedPayload = { updatedAt: string; territoryRaw: unknown; locationRaw: unknown; wikiRaw?: unknown; mapData?: CachedMapData };
 type MarkerRule = { key: keyof typeof MARKER_VISUALS; kind?: string; iconEquals?: string; nameEquals?: string; iconIncludes?: string[]; nameIncludes?: string[] };
 type PolylineStyle = { lineWidth: number; strokeStyle: string; lineDash?: number[] };
+type CoordinateWorldPoint = { x: number; z: number };
+type CoordinateImagePoint = { x: number; y: number };
+
+declare global {
+  interface Window {
+    uwmDebug?: {
+      showImageCoordinates: () => boolean;
+      setShowImageCoordinates: (enabled: boolean) => boolean;
+    };
+  }
+}
 
 const MAP_IMAGE_URL = "./TopographicMap.png";
 const BUNDLED_CACHE_URL = "./cache/wynn-data.json";
@@ -84,7 +95,7 @@ const colorCache = new Map<string, string>();
 
 const canvas = $<HTMLCanvasElement>("#map-canvas");
 const territoriesToggle = $<HTMLInputElement>("#toggle-territories");
-const locationsToggle = $<HTMLInputElement>("#toggle-locations");
+const locationsToggle = { checked: true } as const;
 const outOfBoundsMarkersToggle = $<HTMLInputElement>("#toggle-out-of-bounds-markers");
 const locationLabelsToggle = $<HTMLInputElement>("#toggle-location-labels");
 const locationIconSizeInput = $<HTMLInputElement>("#location-icon-size");
@@ -104,6 +115,7 @@ const sideMenu = $<HTMLElement>("#side-menu");
 const questMenu = $<HTMLElement>("#quest-menu");
 const mouseWorldCoordsEl = $<HTMLSpanElement>("#mouse-world-coords");
 const mouseImageCoordsEl = $<HTMLSpanElement>("#mouse-image-coords");
+const mouseImageCoordsChipEl = mouseImageCoordsEl.closest<HTMLElement>(".coord-chip");
 const resetBtn = $<HTMLButtonElement>("#reset-view");
 const statusEl = $<HTMLParagraphElement>("#status");
 
@@ -134,6 +146,7 @@ let devicePixelRatioScale = 1;
 let locationIconSize = Number(locationIconSizeInput.value) || 18;
 let lastPointerWorld: { x: number; z: number } | null = null;
 let lastPointerImage: { x: number; y: number } | null = null;
+let showImageCoordinates = false;
 const enabledMarkerTypes = new Set<string>();
 let hasInitializedMarkerTypes = false;
 let questOptions: QuestOption[] = [];
@@ -292,7 +305,13 @@ function shouldShowOutOfBoundsMarkers(): boolean {
   return outOfBoundsMarkersToggle.checked;
 }
 
-function setCoordinateReadout(world?: { x: number; z: number }, image?: { x: number; y: number }): void {
+function syncCoordinateReadoutVisibility(): void {
+  if (mouseImageCoordsChipEl) {
+    mouseImageCoordsChipEl.hidden = !showImageCoordinates;
+  }
+}
+
+function setCoordinateReadout(world?: CoordinateWorldPoint, image?: CoordinateImagePoint): void {
   if (!world || !image) {
     lastPointerWorld = null;
     lastPointerImage = null;
@@ -313,17 +332,30 @@ async function copyCurrentCoordinates(): Promise<void> {
     return;
   }
 
-  const payload =
-    `Map: x ${Math.round(lastPointerWorld.x)}, z ${Math.round(lastPointerWorld.z)}\n` +
-    `Image: x ${Math.round(lastPointerImage.x)}, y ${Math.round(lastPointerImage.y)}`;
+  const payload = showImageCoordinates
+    ? `Map: x ${Math.round(lastPointerWorld.x)}, z ${Math.round(lastPointerWorld.z)}\n` +
+      `Image: x ${Math.round(lastPointerImage.x)}, y ${Math.round(lastPointerImage.y)}`
+    : `Map: x ${Math.round(lastPointerWorld.x)}, z ${Math.round(lastPointerWorld.z)}`;
 
   try {
     await navigator.clipboard.writeText(payload);
-    setStatus(`Copied calibration coordinates. Press "c" over the map to copy again.`);
+    setStatus(`Copied map coordinates. Press "c" over the map to copy again.`);
   } catch {
     setStatus("Could not copy coordinates to the clipboard.");
   }
 }
+
+function setShowImageCoordinates(enabled: boolean): boolean {
+  showImageCoordinates = enabled;
+  syncCoordinateReadoutVisibility();
+  setCoordinateReadout(lastPointerWorld ?? undefined, lastPointerImage ?? undefined);
+  return showImageCoordinates;
+}
+
+window.uwmDebug = {
+  showImageCoordinates: () => showImageCoordinates,
+  setShowImageCoordinates,
+};
 
 function classifyMarkerVisual(location: OverlayPoint): MarkerVisual {
   const icon = location.icon.toLowerCase();
@@ -1798,7 +1830,6 @@ canvas.addEventListener(
 );
 
 territoriesToggle.addEventListener("change", draw);
-[locationsToggle].forEach((element) => element.addEventListener("change", () => setActiveOverlayMode("marker")));
 outOfBoundsMarkersToggle.addEventListener("change", () => {
   buildLegend();
   buildQuestStageList();
