@@ -281,7 +281,7 @@ test('buildUnifiedMapData applies marker and quest overrides as replacements', (
 
   const mapData = buildUnifiedMapData(locationRaw, wikiPages, {
     markersToDelete: [{ name: 'Old Tower', x: 100, z: 200 }],
-    markersToAdd: [{ name: 'New Tower', icon: 'marker', x: 101, y: 70, z: 201 }],
+    markersToAdd: [{ name: 'New Tower', icon: 'location', x: 101, y: 70, z: 201 }],
     questsToDelete: ['Old Quest'],
     questsToAdd: [
       {
@@ -312,6 +312,30 @@ test('buildUnifiedMapData applies marker and quest overrides as replacements', (
   const replacedQuestPoint = mapData.points.find((point) => point.id === 'point:500,600');
   assert.ok(replacedQuestPoint);
   assert.ok(replacedQuestPoint.sourceKinds.includes('manual-quest-point'));
+});
+
+test('buildUnifiedMapData accepts 2d x and y coordinates for manual overrides', () => {
+  const mapData = buildUnifiedMapData([], [], {
+    markersToAdd: [{ name: '2D Marker', icon: 'location', x: 111, y: 222 }],
+    questsToAdd: [
+      {
+        title: '2D Quest',
+        points: [
+          { label: 'Stage 1', x: 10, y: 20 },
+          { label: 'Stage 2', x: 30, y: 40 },
+        ],
+      },
+    ],
+  });
+
+  const markerPoint = mapData.points.find((point) => point.name === '2D Marker');
+  assert.ok(markerPoint);
+  assert.equal(markerPoint.x, 111);
+  assert.equal(markerPoint.z, 222);
+
+  const questPath = mapData.paths.find((path) => path.pageTitle === '2D Quest');
+  assert.ok(questPath);
+  assert.deepEqual(questPath.pointIds, ['point:10,20', 'point:30,40']);
 });
 
 test('buildUnifiedMapData can build quest paths from RenderLocation entries', () => {

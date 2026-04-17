@@ -152,7 +152,7 @@ const MARKER_TYPE_ORDER = [
   "bank",
   "travel-fast",
   "travel-seaskipper",
-  "travel-balloon",
+  "housing-ballon",
   "blacksmith",
   "potion",
   "scroll-merchant",
@@ -214,7 +214,7 @@ const MARKER_VISUALS = {
   potion: { key: "potion", label: "Potions", description: "Potion merchants", group: "vendors", fill: "#ef4444", stroke: "#fff1f2", glyph: "!", shape: "circle" },
   "travel-fast": { key: "travel-fast", label: "Fast Travel", description: "Direct fast-travel points", group: "travel", fill: "#0ea5e9", stroke: "#eff6ff", glyph: "✦", shape: "square" },
   "travel-seaskipper": { key: "travel-seaskipper", label: "Sea Skipper", description: "Sea skipper travel routes", group: "travel", fill: "#0284c7", stroke: "#e0f2fe", glyph: "⚓", shape: "square" },
-  "travel-balloon": { key: "travel-balloon", label: "Housing Balloon", description: "Housing air balloon transport", group: "services", fill: "#7dd3fc", stroke: "#f0f9ff", glyph: "◌", shape: "circle" },
+  "housing-ballon": { key: "housing-ballon", label: "Housing Ballon", description: "Housing ballon", group: "services", fill: "#7dd3fc", stroke: "#f0f9ff", glyph: "◌", shape: "circle" },
   blacksmith: { key: "blacksmith", label: "Blacksmiths", description: "Blacksmiths and equipment repair services", group: "services", fill: "#92400e", stroke: "#fef3c7", glyph: "⚒", shape: "square" },
   "scroll-merchant": { key: "scroll-merchant", label: "Scroll Merchants", description: "Teleport and utility scroll vendors", group: "vendors", fill: "#c08457", stroke: "#fff7ed", glyph: "S", shape: "diamond" },
   merchant: { key: "merchant", label: "Vendors", description: "Shops, buyers, and general vendors", group: "vendors", fill: "#f59e0b", stroke: "#fffbeb", glyph: "$", shape: "square" },
@@ -234,7 +234,7 @@ const MARKER_RULES: MarkerRule[] = [
   { key: "potion", iconIncludes: ["potion"] },
   { key: "travel-fast", iconIncludes: ["fasttravel"], nameEquals: "fast travel" },
   { key: "travel-seaskipper", iconIncludes: ["seaskipper"], nameIncludes: ["seaskipper", "sea skipper"] },
-  { key: "travel-balloon", iconIncludes: ["housingairballoon"], nameIncludes: ["balloon"] },
+  { key: "housing-ballon", iconIncludes: ["housingairballoon"], nameIncludes: ["balloon"] },
   { key: "scroll-merchant", iconIncludes: ["merchant_scroll", "scroll"], nameIncludes: ["scroll merchant", "scrolls"] },
   { key: "blacksmith", iconIncludes: ["blacksmith"], nameIncludes: ["blacksmith"] },
   { key: "merchant", iconIncludes: ["weapon", "armour"], nameIncludes: ["merchant"] },
@@ -331,6 +331,9 @@ function classifyMarkerVisual(location: OverlayPoint): MarkerVisual {
 
   if (location.kind === "quest") {
     return MARKER_VISUALS.quest;
+  }
+  if (icon in MARKER_VISUALS) {
+    return MARKER_VISUALS[icon as keyof typeof MARKER_VISUALS];
   }
   for (const rule of MARKER_RULES) {
     const matchesKind = !rule.kind || location.kind === rule.kind;

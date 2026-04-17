@@ -1,0 +1,19 @@
+{
+  "markersToDelete": [],
+  "markersToAdd": [
+    {
+      "name": "Orphion's Nexus of Light",
+      "icon": "raid",
+      "x": -740,
+      "z": -6476
+    },
+    {
+      "name": "Housing Ballon",
+      "icon": "housing-ballon",
+      "x": -1600,
+      "z": -2937
+    }
+  ],
+  "questsToDelete": [],
+  "questsToAdd": []
+}

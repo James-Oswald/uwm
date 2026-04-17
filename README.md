@@ -28,7 +28,7 @@ The cache now stores:
 - raw territory API data,
 - raw official map marker data,
 - raw wiki page data loaded from a local MediaWiki XML backup,
-- manual override directives loaded from `cache/manual-overrides.json`,
+- manual override directives loaded from `overrides/manual-overrides.json`,
 - a compressed wiki page backup at `cache/wiki-pages-backup.xml.gz` for offline reuse,
 - a normalized `mapData` layer with deduplicated `points`, wiki `paths`, and page metadata.
 
@@ -44,7 +44,7 @@ npm run serve
 
 `scrape:wiki` downloads a compressed MediaWiki XML backup of the relevant wiki pages.
 
-`build:cache` refreshes the official API data, reads the local wiki XML backup plus `cache/manual-overrides.json`, and writes `cache/wynn-data.json`.
+`build:cache` refreshes the official API data, reads the local wiki XML backup plus `overrides/manual-overrides.json`, and writes `cache/wynn-data.json`.
 
 `update-cache` runs both steps together, and is intended for manual cache refreshes rather than normal deploys.
 
@@ -76,7 +76,7 @@ The build step is resilient: if one source is unavailable, it keeps the previous
 
 ## Manual overrides
 
-Manual cache corrections live in `cache/manual-overrides.json`.
+Manual cache corrections live in `overrides/manual-overrides.json`.
 The file supports four lists:
 
 - `markersToDelete`: marker matchers to remove before the cache is normalized
@@ -87,7 +87,7 @@ The file supports four lists:
 If an override includes both a delete entry and a matching add entry, the cache build effectively treats that as a replacement.
 
 This repository also includes two GitHub issue forms for marker and quest override requests.
-After you review a request, add the `approved-override` label and the `Approve Manual Override` workflow will merge the issue payload into `cache/manual-overrides.json` and rebuild `cache/wynn-data.json`.
+After you review a request, add the `approved-override` label and the `Approve Manual Override` workflow will merge the issue payload into `overrides/manual-overrides.json` and rebuild `cache/wynn-data.json`.
 
 ## Endpoint notes
 

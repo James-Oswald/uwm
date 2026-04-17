@@ -1,6 +1,6 @@
-name: Quest override request
-description: Request a manual quest removal, addition, or replacement in the cache build.
-title: "[Override][Quest]: "
+name: Quest override / fix request
+description: Request a manual quest removal, addition, or replacement in the cache build. Note that quests are scrapted from the wiki and thus we prefer you fix them there first, and changes will make their way here eventially. This should only be used in events where wiki fixes are impossible due to quest structure etc.
+title: "Override [Quest]: "
 labels:
   - cache-override
   - quest-override
@@ -8,42 +8,22 @@ body:
   - type: markdown
     attributes:
       value: |
-        Submit JSON arrays for the quests you want removed or added.
-        Quest additions should include a `title` and a `points` array with `x` and `z` coordinates for each stage.
-        After review, apply the `approved-override` label to merge it into `cache/manual-overrides.json`.
+        Submit quest overrides only in this form.
+        If you include both a deletion and an addition for the same quest, the cache builder will treat that as a replacement.
+        After review, apply the `approved-override` label to merge it into `overrides/manual-overrides.json`.
   - type: textarea
     id: summary
     attributes:
       label: Summary
       description: Short explanation of the quest change and why it is needed.
-      placeholder: The quest route is missing its final stage and needs a corrected replacement path.
-    validations:
-      required: true
-  - type: textarea
-    id: markers_to_delete
-    attributes:
-      label: Markers to delete
-      description: Leave this as `[]` for quest-only requests.
-      value: |
-        []
-      render: json
-    validations:
-      required: true
-  - type: textarea
-    id: markers_to_add
-    attributes:
-      label: Markers to add
-      description: Leave this as `[]` for quest-only requests.
-      value: |
-        []
-      render: json
+      placeholder: The quest route is missing its final stages and needs a corrected replacement path.
     validations:
       required: true
   - type: textarea
     id: quests_to_delete
     attributes:
       label: Quests to delete
-      description: JSON array of quest titles or objects with a `title` field.
+      description: JSON array of quest names to remove.
       value: |
         [
           "Example Quest"
@@ -55,15 +35,14 @@ body:
     id: quests_to_add
     attributes:
       label: Quests to add
-      description: JSON array of quest objects. Each quest should include `title` and `points`. Optional fields are `pageType`, `categories`, and point `label`/`y`.
+      description: JSON array of quests to add. Each quest should include `title` and a `points` array with 2D `x` and `y` map coordinates. Point `label` is optional.
       value: |
         [
           {
             "title": "Example Quest",
-            "pageType": "quest",
             "points": [
-              { "label": "Stage 1", "x": 100, "y": 64, "z": 200 },
-              { "label": "Stage 2", "x": 120, "y": 65, "z": 240 }
+              { "label": "Stage 1", "x": 100, "y": 200 },
+              { "label": "Stage 2", "x": 120, "y": 240 }
             ]
           }
         ]

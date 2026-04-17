@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = resolve(__filename, '..', '..');
-const overridesPath = resolve(repoRoot, 'cache', 'manual-overrides.json');
+const overridesPath = resolve(repoRoot, 'overrides', 'manual-overrides.json');
 const eventPath = process.env.GITHUB_EVENT_PATH;
 
 const EMPTY_OVERRIDES = {

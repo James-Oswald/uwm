@@ -10,7 +10,7 @@ const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '..');
 const outputPath = resolve(repoRoot, 'cache', 'wynn-data.json');
 const wikiBackupPath = resolve(repoRoot, 'cache', 'wiki-pages-backup.xml.gz');
-const manualOverridesPath = resolve(repoRoot, 'cache', 'manual-overrides.json');
+const manualOverridesPath = resolve(repoRoot, 'overrides', 'manual-overrides.json');
 
 const API_ORIGIN = 'https://api.wynncraft.com/v3';
 const TERRITORY_CANDIDATES = [`${API_ORIGIN}/guild/list/territory`, `${API_ORIGIN}/guild/territory`];
@@ -46,6 +46,26 @@ const EMPTY_MANUAL_OVERRIDES = {
   questsToDelete: [],
   questsToAdd: [],
 };
+
+const SUPPORTED_MANUAL_MARKER_ICONS = new Set([
+  'quest',
+  'location',
+  'bank',
+  'travel-fast',
+  'travel-seaskipper',
+  'housing-ballon',
+  'blacksmith',
+  'potion',
+  'scroll-merchant',
+  'merchant',
+  'identifier',
+  'station',
+  'cave',
+  'dungeon',
+  'boss-altar',
+  'raid',
+  'misc',
+]);
 
 async function fetchFirstJson(urls) {
   const failures = [];
@@ -267,6 +287,34 @@ function parseOptionalNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function tagsForManualMarkerIcon(icon) {
+  switch (icon) {
+    case 'quest':
+      return ['manual-override', 'quest-path', 'activity'];
+    case 'travel-fast':
+    case 'travel-seaskipper':
+      return ['manual-override', 'travel'];
+    case 'bank':
+    case 'potion':
+    case 'scroll-merchant':
+    case 'merchant':
+    case 'identifier':
+    case 'housing-ballon':
+    case 'blacksmith':
+    case 'station':
+      return ['manual-override', 'service'];
+    case 'cave':
+    case 'dungeon':
+    case 'boss-altar':
+    case 'raid':
+      return ['manual-override', 'hazard'];
+    case 'location':
+    case 'misc':
+    default:
+      return ['manual-override', 'location'];
+  }
+}
+
 function createPointKey(x, z) {
   return `${Math.round(x)},${Math.round(z)}`;
 }
@@ -469,7 +517,7 @@ function normalizeManualMarkerDelete(entry, index) {
   const name = typeof entry.name === 'string' ? canonicalizeWhitespace(entry.name) : '';
   const icon = typeof entry.icon === 'string' ? canonicalizeWhitespace(entry.icon) : '';
   const x = parseOptionalNumber(entry.x);
-  const z = parseOptionalNumber(entry.z);
+  const z = parseOptionalNumber(entry.z ?? entry.y);
 
   if (!name && !icon && !Number.isFinite(x) && !Number.isFinite(z)) {
     throw new Error(`manual override markersToDelete[${index}] must include at least one matcher field`);
@@ -491,14 +539,17 @@ function normalizeManualMarkerAdd(entry, index) {
   const name = canonicalizeWhitespace(String(entry.name ?? ''));
   const x = parseOptionalNumber(entry.x);
   const y = parseOptionalNumber(entry.y);
-  const z = parseOptionalNumber(entry.z);
-  const icon = canonicalizeWhitespace(String(entry.icon ?? 'marker')) || 'marker';
+  const z = parseOptionalNumber(entry.z ?? entry.y);
+  const icon = canonicalizeWhitespace(String(entry.icon ?? 'location')).toLowerCase() || 'location';
 
   if (!name) {
     throw new Error(`manual override markersToAdd[${index}] must include a name`);
   }
   if (!Number.isFinite(x) || !Number.isFinite(z)) {
-    throw new Error(`manual override markersToAdd[${index}] must include finite x and z coordinates`);
+    throw new Error(`manual override markersToAdd[${index}] must include finite x and y coordinates`);
+  }
+  if (!SUPPORTED_MANUAL_MARKER_ICONS.has(icon)) {
+    throw new Error(`manual override markersToAdd[${index}] icon must be one of: ${[...SUPPORTED_MANUAL_MARKER_ICONS].join(', ')}`);
   }
 
   return {
@@ -510,7 +561,7 @@ function normalizeManualMarkerAdd(entry, index) {
     sourceKind: 'manual-marker',
     tags: Array.isArray(entry.tags)
       ? entry.tags.map((tag) => canonicalizeWhitespace(String(tag))).filter(Boolean)
-      : ['manual-override', ...tagsForOfficialMarker({ icon, name })],
+      : tagsForManualMarkerIcon(icon),
   };
 }
 
@@ -542,11 +593,11 @@ function normalizeManualQuestPoint(entry, questIndex, pointIndex) {
 
   const x = parseOptionalNumber(entry.x);
   const y = parseOptionalNumber(entry.y);
-  const z = parseOptionalNumber(entry.z);
+  const z = parseOptionalNumber(entry.z ?? entry.y);
   const label = typeof entry.label === 'string' ? canonicalizeWhitespace(entry.label) : '';
 
   if (!Number.isFinite(x) || !Number.isFinite(z)) {
-    throw new Error(`manual override questsToAdd[${questIndex}].points[${pointIndex}] must include finite x and z coordinates`);
+    throw new Error(`manual override questsToAdd[${questIndex}].points[${pointIndex}] must include finite x and y coordinates`);
   }
 
   return {

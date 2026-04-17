@@ -8,28 +8,27 @@ body:
   - type: markdown
     attributes:
       value: |
-        Submit JSON arrays for the markers you want removed or added.
-        If you include both a removal and an addition for the same marker, the cache builder will treat it as a replacement on the next rebuild.
-        After review, apply the `approved-override` label to merge it into `cache/manual-overrides.json`.
+        Submit marker overrides only in this form.
+        If you include both a deletion and an addition for the same spot, the cache builder will treat that as a replacement.
+        After review, apply the `approved-override` label to merge it into `overrides/manual-overrides.json`.
   - type: textarea
     id: summary
     attributes:
       label: Summary
       description: Short explanation of what should change and why.
-      placeholder: The Maltic seaskipper marker is misplaced and should move one tile east.
+      placeholder: The seaskipper marker in Nemract is misplaced and should be moved to the dock.
     validations:
       required: true
   - type: textarea
     id: markers_to_delete
     attributes:
       label: Markers to delete
-      description: JSON array of marker matchers. Use `name`, `icon`, `x`, and `z` as needed.
+      description: JSON array of marker locations to remove. Use coordinates because many markers share the same name.
       value: |
         [
           {
-            "name": "Example Marker",
             "x": 123,
-            "z": -456
+            "y": -456
           }
         ]
       render: json
@@ -39,37 +38,35 @@ body:
     id: markers_to_add
     attributes:
       label: Markers to add
-      description: JSON array of marker objects. Each object should include `name`, `x`, and `z`. `icon` and `y` are optional.
+      description: |
+        JSON array of markers to add. Each marker should include `name`, `x`, `y`, and `icon`.
+        Use one of the supported map category keys for `icon`:
+        - `quest`: Quests
+        - `location`: Locations
+        - `bank`: Banks
+        - `travel-fast`: Fast Travel
+        - `travel-seaskipper`: Sea Skipper
+        - `travel-balloon`: Housing Balloon
+        - `blacksmith`: Blacksmiths
+        - `potion`: Potions
+        - `scroll-merchant`: Scroll Merchants
+        - `merchant`: Vendors
+        - `identifier`: Identifiers
+        - `station`: Stations
+        - `cave`: Caves
+        - `dungeon`: Dungeons
+        - `boss-altar`: Boss Altars
+        - `raid`: Raids
+        - `misc`: Other
       value: |
         [
           {
             "name": "Example Marker",
-            "icon": "marker",
+            "icon": "travel-seaskipper",
             "x": 124,
-            "y": 70,
-            "z": -456
+            "y": -456
           }
         ]
-      render: json
-    validations:
-      required: true
-  - type: textarea
-    id: quests_to_delete
-    attributes:
-      label: Quests to delete
-      description: Leave this as `[]` for marker-only requests.
-      value: |
-        []
-      render: json
-    validations:
-      required: true
-  - type: textarea
-    id: quests_to_add
-    attributes:
-      label: Quests to add
-      description: Leave this as `[]` for marker-only requests.
-      value: |
-        []
       render: json
     validations:
       required: true
