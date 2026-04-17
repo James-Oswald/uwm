@@ -88,6 +88,11 @@ type QuestOption = {
   pathId: string | null;
 };
 
+type QuestStageLocation = {
+  location: OverlayPoint;
+  stageNumber: number;
+};
+
 type ActiveOverlayMode = "marker" | "quest";
 type MobileMenuKind = "markers" | "quests" | null;
 
@@ -629,6 +634,37 @@ function drawMarkerGlyph(screenX: number, screenY: number, size: number, visual:
   ctx.fillText(visual.glyph, screenX, screenY + size * 0.02);
 }
 
+function drawQuestStageMarker(screenX: number, screenY: number, size: number, stageNumber: number, isHovered: boolean): void {
+  const radius = size / 2;
+  const badgeText = `${stageNumber}`;
+  const badgeFontSize =
+    badgeText.length >= 2 ? Math.max(8, Math.min(size * 0.56, 18)) : Math.max(8, Math.min(size * 0.72, 22));
+
+  if (isHovered) {
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, radius * 1.65, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(139, 92, 246, 0.18)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(245, 235, 255, 0.95)";
+    ctx.lineWidth = Math.max(2, size * 0.12);
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  ctx.arc(screenX, screenY, Math.max(5, radius), 0, Math.PI * 2);
+  ctx.fillStyle = isHovered ? "#7c3aed" : "#8b5cf6";
+  ctx.fill();
+  ctx.strokeStyle = isHovered ? "#f5ebff" : "#ede9fe";
+  ctx.lineWidth = Math.max(1.5, size * 0.11);
+  ctx.stroke();
+
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = `700 ${badgeFontSize}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(badgeText, screenX, screenY + size * 0.02);
+}
+
 function isMarkerTypeEnabled(typeKey: string): boolean {
   return enabledMarkerTypes.has(typeKey);
 }
@@ -641,15 +677,27 @@ function getSelectedQuest(): QuestOption | null {
 }
 
 function getActiveQuestLocations(): OverlayPoint[] {
+  return getActiveQuestStageLocations().map((entry) => entry.location);
+}
+
+function getActiveQuestStageLocations(): QuestStageLocation[] {
   const selectedQuest = getSelectedQuest();
   if (!selectedQuest) {
     return [];
   }
 
   return selectedQuest.pointIds
-    .map((pointId) => questLocationById.get(pointId))
-    .filter((location): location is OverlayPoint => Boolean(location))
-    .filter((location) => shouldShowOutOfBoundsMarkers() || isPointWithinMapBounds(location.world));
+    .map((pointId, index) => {
+      const location = questLocationById.get(pointId);
+      if (!location) {
+        return null;
+      }
+      if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
+        return null;
+      }
+      return { location, stageNumber: index + 1 };
+    })
+    .filter((entry): entry is QuestStageLocation => Boolean(entry));
 }
 
 function getActiveQuestPath(): OverlayPath | null {
@@ -1342,19 +1390,19 @@ function syncQuestSelectionControl(): void {
 
 function buildQuestStageList(): void {
   const selectedQuest = getSelectedQuest();
-  const activeQuestLocations = getActiveQuestLocations();
+  const activeQuestStages = getActiveQuestStageLocations();
   questStageList.replaceChildren();
 
-  if (!selectedQuest || activeQuestLocations.length === 0) {
+  if (!selectedQuest || activeQuestStages.length === 0) {
     questStageSummary.textContent = selectedQuest
       ? "This quest does not currently have ordered stage markers to show."
       : "Select a quest to view its stages.";
     return;
   }
 
-  questStageSummary.textContent = `${selectedQuest.label} has ${activeQuestLocations.length.toLocaleString()} numbered stages. Hover a stage to highlight it on the map.`;
+  questStageSummary.textContent = `${selectedQuest.label} has ${activeQuestStages.length.toLocaleString()} numbered stages. Hover a stage to highlight it on the map.`;
 
-  activeQuestLocations.forEach((location, index) => {
+  activeQuestStages.forEach(({ location, stageNumber }) => {
     const item = document.createElement("li");
     item.className = "quest-stage-item";
 
@@ -1365,7 +1413,7 @@ function buildQuestStageList(): void {
 
     const indexBadge = document.createElement("span");
     indexBadge.className = "quest-stage-index";
-    indexBadge.textContent = `${index + 1}`;
+    indexBadge.textContent = `${stageNumber}`;
 
     const meta = document.createElement("span");
     meta.className = "quest-stage-meta";
@@ -1690,36 +1738,19 @@ function drawPaths(): void {
 
 function drawLocations(): void {
   if (activeOverlayMode === "quest") {
-    const activeQuestLocations = getActiveQuestLocations();
-    if (activeQuestLocations.length === 0) {
+    const activeQuestStages = getActiveQuestStageLocations();
+    if (activeQuestStages.length === 0) {
       return;
     }
 
     const iconSize = Math.max(8, Math.min(48, locationIconSize));
-    const halfIconSize = iconSize / 2;
 
-    for (const location of activeQuestLocations) {
-      if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
-        continue;
-      }
+    for (const { location, stageNumber } of activeQuestStages) {
       const image = worldToMapImage(location.world);
       const screen = imageToScreen(image, { scale, offsetX, offsetY });
-      const visual = classifyMarkerVisual(location);
       const isHoveredStage = hoveredQuestPointId === location.id;
       const drawSize = isHoveredStage ? Math.min(56, iconSize + 8) : iconSize;
-
-      if (isHoveredStage) {
-        ctx.beginPath();
-        ctx.arc(screen.x, screen.y, drawSize * 0.8, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(139, 92, 246, 0.18)";
-        ctx.fill();
-        ctx.strokeStyle = "rgba(245, 235, 255, 0.95)";
-        ctx.lineWidth = Math.max(2, drawSize * 0.12);
-        ctx.stroke();
-      }
-
-      drawMarkerShape(screen.x, screen.y, drawSize, visual);
-      drawMarkerGlyph(screen.x, screen.y, drawSize, visual);
+      drawQuestStageMarker(screen.x, screen.y, drawSize, stageNumber, isHoveredStage);
 
       if (locationLabelsToggle.checked && scale > minScale * 2.1) {
         ctx.fillStyle = "#f1f5f9";
