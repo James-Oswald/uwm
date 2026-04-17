@@ -4,7 +4,7 @@ A fully client-side TypeScript web app that:
 
 - renders `TopographicMap.png` on an HTML canvas,
 - supports drag-to-pan and wheel-to-zoom,
-- overlays guild territories, unified map points, and wiki-derived route paths,
+- overlays guild territories, unified map points, and quest routes,
 - reads pre-generated cached data from `cache/wynn-data.json` (no frontend API calls).
 
 ## Run locally
@@ -28,6 +28,7 @@ The cache now stores:
 - raw territory API data,
 - raw official map marker data,
 - raw wiki page data loaded from a local MediaWiki XML backup,
+- manual override directives loaded from `cache/manual-overrides.json`,
 - a compressed wiki page backup at `cache/wiki-pages-backup.xml.gz` for offline reuse,
 - a normalized `mapData` layer with deduplicated `points`, wiki `paths`, and page metadata.
 
@@ -43,7 +44,7 @@ npm run serve
 
 `scrape:wiki` downloads a compressed MediaWiki XML backup of the relevant wiki pages.
 
-`build:cache` refreshes the official API data, reads the local wiki XML backup, and writes `cache/wynn-data.json`.
+`build:cache` refreshes the official API data, reads the local wiki XML backup plus `cache/manual-overrides.json`, and writes `cache/wynn-data.json`.
 
 `update-cache` runs both steps together, and is intended for manual cache refreshes rather than normal deploys.
 
@@ -72,6 +73,21 @@ Suggested weekly cron (UTC Sundays at 02:00):
 There is also a manual GitHub Actions workflow named `Refresh Cached Data` that runs `npm run update-cache` and commits any changed cache files back to `main`.
 
 The build step is resilient: if one source is unavailable, it keeps the previous cached value for that section and still rebuilds the normalized `mapData` layer from whatever data is available.
+
+## Manual overrides
+
+Manual cache corrections live in `cache/manual-overrides.json`.
+The file supports four lists:
+
+- `markersToDelete`: marker matchers to remove before the cache is normalized
+- `markersToAdd`: marker records to inject manually
+- `questsToDelete`: quest titles to remove before wiki quest parsing
+- `questsToAdd`: quest records with explicit `points` to inject manually
+
+If an override includes both a delete entry and a matching add entry, the cache build effectively treats that as a replacement.
+
+This repository also includes two GitHub issue forms for marker and quest override requests.
+After you review a request, add the `approved-override` label and the `Approve Manual Override` workflow will merge the issue payload into `cache/manual-overrides.json` and rebuild `cache/wynn-data.json`.
 
 ## Endpoint notes
 

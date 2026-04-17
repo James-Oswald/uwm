@@ -10,6 +10,7 @@ const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '..');
 const outputPath = resolve(repoRoot, 'cache', 'wynn-data.json');
 const wikiBackupPath = resolve(repoRoot, 'cache', 'wiki-pages-backup.xml.gz');
+const manualOverridesPath = resolve(repoRoot, 'cache', 'manual-overrides.json');
 
 const API_ORIGIN = 'https://api.wynncraft.com/v3';
 const TERRITORY_CANDIDATES = [`${API_ORIGIN}/guild/list/territory`, `${API_ORIGIN}/guild/territory`];
@@ -37,6 +38,13 @@ const EMPTY_PAYLOAD = {
       questPathCount: 0,
     },
   },
+};
+
+const EMPTY_MANUAL_OVERRIDES = {
+  markersToDelete: [],
+  markersToAdd: [],
+  questsToDelete: [],
+  questsToAdd: [],
 };
 
 async function fetchFirstJson(urls) {
@@ -250,6 +258,15 @@ function parseCoordinateParts(rawValue) {
   return { x: parts[0], y: null, z: parts[1] };
 }
 
+function parseOptionalNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function createPointKey(x, z) {
   return `${Math.round(x)},${Math.round(z)}`;
 }
@@ -434,6 +451,170 @@ function normalizeLocations(locationRaw) {
 
   visit(rawObj, 'Location');
   return collected;
+}
+
+function normalizeManualMarkerDelete(entry, index) {
+  if (typeof entry === 'string') {
+    const name = canonicalizeWhitespace(entry);
+    if (!name) {
+      throw new Error(`manual override markersToDelete[${index}] must not be an empty string`);
+    }
+    return { name };
+  }
+
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`manual override markersToDelete[${index}] must be an object or string`);
+  }
+
+  const name = typeof entry.name === 'string' ? canonicalizeWhitespace(entry.name) : '';
+  const icon = typeof entry.icon === 'string' ? canonicalizeWhitespace(entry.icon) : '';
+  const x = parseOptionalNumber(entry.x);
+  const z = parseOptionalNumber(entry.z);
+
+  if (!name && !icon && !Number.isFinite(x) && !Number.isFinite(z)) {
+    throw new Error(`manual override markersToDelete[${index}] must include at least one matcher field`);
+  }
+
+  return {
+    ...(name ? { name } : {}),
+    ...(icon ? { icon } : {}),
+    ...(Number.isFinite(x) ? { x } : {}),
+    ...(Number.isFinite(z) ? { z } : {}),
+  };
+}
+
+function normalizeManualMarkerAdd(entry, index) {
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`manual override markersToAdd[${index}] must be an object`);
+  }
+
+  const name = canonicalizeWhitespace(String(entry.name ?? ''));
+  const x = parseOptionalNumber(entry.x);
+  const y = parseOptionalNumber(entry.y);
+  const z = parseOptionalNumber(entry.z);
+  const icon = canonicalizeWhitespace(String(entry.icon ?? 'marker')) || 'marker';
+
+  if (!name) {
+    throw new Error(`manual override markersToAdd[${index}] must include a name`);
+  }
+  if (!Number.isFinite(x) || !Number.isFinite(z)) {
+    throw new Error(`manual override markersToAdd[${index}] must include finite x and z coordinates`);
+  }
+
+  return {
+    name,
+    icon,
+    x,
+    y,
+    z,
+    sourceKind: 'manual-marker',
+    tags: Array.isArray(entry.tags)
+      ? entry.tags.map((tag) => canonicalizeWhitespace(String(tag))).filter(Boolean)
+      : ['manual-override', ...tagsForOfficialMarker({ icon, name })],
+  };
+}
+
+function normalizeManualQuestDelete(entry, index) {
+  if (typeof entry === 'string') {
+    const title = canonicalizeWhitespace(entry);
+    if (!title) {
+      throw new Error(`manual override questsToDelete[${index}] must not be an empty string`);
+    }
+    return { title };
+  }
+
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`manual override questsToDelete[${index}] must be an object or string`);
+  }
+
+  const title = canonicalizeWhitespace(String(entry.title ?? ''));
+  if (!title) {
+    throw new Error(`manual override questsToDelete[${index}] must include a title`);
+  }
+
+  return { title };
+}
+
+function normalizeManualQuestPoint(entry, questIndex, pointIndex) {
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`manual override questsToAdd[${questIndex}].points[${pointIndex}] must be an object`);
+  }
+
+  const x = parseOptionalNumber(entry.x);
+  const y = parseOptionalNumber(entry.y);
+  const z = parseOptionalNumber(entry.z);
+  const label = typeof entry.label === 'string' ? canonicalizeWhitespace(entry.label) : '';
+
+  if (!Number.isFinite(x) || !Number.isFinite(z)) {
+    throw new Error(`manual override questsToAdd[${questIndex}].points[${pointIndex}] must include finite x and z coordinates`);
+  }
+
+  return {
+    x,
+    y,
+    z,
+    ...(label ? { label } : {}),
+  };
+}
+
+function normalizeManualQuestAdd(entry, index) {
+  if (!entry || typeof entry !== 'object') {
+    throw new Error(`manual override questsToAdd[${index}] must be an object`);
+  }
+
+  const title = canonicalizeWhitespace(String(entry.title ?? ''));
+  const pageType = canonicalizeWhitespace(String(entry.pageType ?? 'quest')).toLowerCase() || 'quest';
+  const categories = Array.isArray(entry.categories)
+    ? entry.categories.map((category) => canonicalizeWhitespace(String(category))).filter(Boolean)
+    : ['Category:Manual Overrides'];
+  const points = Array.isArray(entry.points) ? entry.points.map((point, pointIndex) => normalizeManualQuestPoint(point, index, pointIndex)) : [];
+
+  if (!title) {
+    throw new Error(`manual override questsToAdd[${index}] must include a title`);
+  }
+  if (points.length === 0) {
+    throw new Error(`manual override questsToAdd[${index}] must include at least one point`);
+  }
+
+  return {
+    title,
+    pageType,
+    categories,
+    points,
+  };
+}
+
+function normalizeManualOverrides(rawOverrides) {
+  if (!rawOverrides || typeof rawOverrides !== 'object') {
+    return EMPTY_MANUAL_OVERRIDES;
+  }
+
+  return {
+    markersToDelete: Array.isArray(rawOverrides.markersToDelete)
+      ? rawOverrides.markersToDelete.map((entry, index) => normalizeManualMarkerDelete(entry, index))
+      : [],
+    markersToAdd: Array.isArray(rawOverrides.markersToAdd)
+      ? rawOverrides.markersToAdd.map((entry, index) => normalizeManualMarkerAdd(entry, index))
+      : [],
+    questsToDelete: Array.isArray(rawOverrides.questsToDelete)
+      ? rawOverrides.questsToDelete.map((entry, index) => normalizeManualQuestDelete(entry, index))
+      : [],
+    questsToAdd: Array.isArray(rawOverrides.questsToAdd)
+      ? rawOverrides.questsToAdd.map((entry, index) => normalizeManualQuestAdd(entry, index))
+      : [],
+  };
+}
+
+async function loadManualOverrides() {
+  try {
+    const raw = await readFile(manualOverridesPath, 'utf8');
+    return normalizeManualOverrides(JSON.parse(raw));
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return EMPTY_MANUAL_OVERRIDES;
+    }
+    throw error;
+  }
 }
 
 function stripComments(value) {
@@ -841,10 +1022,20 @@ function tagsForOfficialMarker(location) {
   if (icon.includes('quest') || name.includes('quest')) {
     return ['quest-path', 'activity'];
   }
-  if (icon.includes('fasttravel') || icon.includes('seaskipper') || name.includes('seaskipper') || name.includes('balloon')) {
+  if (icon.includes('fasttravel') || icon.includes('seaskipper') || name.includes('seaskipper')) {
     return ['travel'];
   }
-  if (icon.includes('emerald') || icon.includes('merchant') || icon.includes('identifier') || icon.includes('potion')) {
+  if (
+    icon.includes('emerald') ||
+    icon.includes('merchant') ||
+    icon.includes('identifier') ||
+    icon.includes('potion') ||
+    icon.includes('profession') ||
+    icon.includes('blacksmith') ||
+    name.includes('balloon') ||
+    name.includes('blacksmith') ||
+    name.includes('station')
+  ) {
     return ['service'];
   }
   if (icon.includes('cave') || icon.includes('dungeon') || icon.includes('raid') || icon.includes('bossaltar')) {
@@ -868,25 +1059,67 @@ function tagsForWikiPageType(pageType) {
   }
 }
 
-export function buildUnifiedMapData(locationRaw, wikiPagesRaw) {
+function matchesMarkerOverride(location, matcher) {
+  if (matcher.name && normalizeName(location.name) !== normalizeName(matcher.name)) {
+    return false;
+  }
+  if (matcher.icon && String(location.icon ?? '').toLowerCase() !== String(matcher.icon).toLowerCase()) {
+    return false;
+  }
+  if (Number.isFinite(matcher.x) && Number(location.x) !== matcher.x) {
+    return false;
+  }
+  if (Number.isFinite(matcher.z) && Number(location.z) !== matcher.z) {
+    return false;
+  }
+  return true;
+}
+
+function applyMarkerOverrides(officialLocations, manualOverrides) {
+  const filteredLocations = officialLocations.filter(
+    (location) => !manualOverrides.markersToDelete.some((matcher) => matchesMarkerOverride(location, matcher)),
+  );
+  return [...filteredLocations, ...manualOverrides.markersToAdd];
+}
+
+function applyQuestOverrides(wikiPagesRaw, manualOverrides) {
+  const deletedTitles = new Set(manualOverrides.questsToDelete.map((quest) => normalizeName(quest.title)));
+  const keptPages = wikiPagesRaw.filter((page) => !deletedTitles.has(normalizeName(String(page?.title ?? ''))));
+  const manualPages = manualOverrides.questsToAdd.map((quest, index) => ({
+    pageId: -(index + 1),
+    title: quest.title,
+    categories: quest.categories,
+    pageType: quest.pageType,
+    manualPoints: quest.points,
+    manualOverride: true,
+    wikitext: '',
+  }));
+
+  return [...keptPages, ...manualPages];
+}
+
+export function buildUnifiedMapData(locationRaw, wikiPagesRaw, manualOverrides = EMPTY_MANUAL_OVERRIDES) {
+  const normalizedOverrides = normalizeManualOverrides(manualOverrides);
   const pointMap = new Map();
-  const officialLocations = normalizeLocations(locationRaw);
+  const officialLocations = applyMarkerOverrides(normalizeLocations(locationRaw), normalizedOverrides);
+  const wikiPages = applyQuestOverrides(wikiPagesRaw, normalizedOverrides);
 
   for (const location of officialLocations) {
     const key = createPointKey(location.x, location.z);
+    const sourceKind = location.sourceKind ?? 'official-marker';
     const point = createPointRecord(pointMap.get(key), {
       x: location.x,
-      y: null,
+      y: Number.isFinite(location.y) ? location.y : null,
       z: location.z,
       alias: location.name,
       icon: location.icon,
-      sourceKind: 'official-marker',
+      sourceKind,
       sourceRef: {
-        kind: 'official-marker',
+        kind: sourceKind,
         name: location.name,
         icon: location.icon,
       },
-      tags: tagsForOfficialMarker(location),
+      tags: Array.isArray(location.tags) ? location.tags : tagsForOfficialMarker(location),
     });
     pointMap.set(key, point);
   }
@@ -895,33 +1128,55 @@ export function buildUnifiedMapData(locationRaw, wikiPagesRaw) {
   const paths = [];
   let wikiCoordinateCount = 0;
 
-  for (const rawPage of wikiPagesRaw) {
+  for (const rawPage of wikiPages) {
     if (!rawPage?.title || !rawPage?.wikitext) {
-      continue;
+      if (!Array.isArray(rawPage?.manualPoints) || rawPage.manualPoints.length === 0) {
+        continue;
+      }
     }
     if (!isPrimaryWikiTitle(rawPage.title)) {
       continue;
     }
-    if (isRemovedWikiPage(rawPage.wikitext)) {
+    if (rawPage.wikitext && isRemovedWikiPage(rawPage.wikitext)) {
       continue;
     }
 
-    const pageType = detectWikiPageType(rawPage.title, rawPage.wikitext);
-    const templateMatches = extractLocationTemplates(rawPage.wikitext).map((match) => ({
+    const pageType =
+      typeof rawPage.pageType === 'string' && rawPage.pageType
+        ? rawPage.pageType
+        : detectWikiPageType(rawPage.title, rawPage.wikitext);
+    const templateMatches = extractLocationTemplates(rawPage.wikitext ?? '').map((match) => ({
       ...match,
       sourceKind: 'wiki-location-template',
       matchText: match.templateText,
     }));
     const inlineMatches =
       pageType === 'quest' || pageType === 'mini-quest'
-        ? extractInlineCoordinates(rawPage.wikitext)
+        ? extractInlineCoordinates(rawPage.wikitext ?? '')
         : [];
-    const coordinates = attachHeadingContext(rawPage.wikitext, [...templateMatches, ...inlineMatches]).filter((match) => {
-      if (match.sourceKind !== 'wiki-inline-coordinate') {
-        return true;
-      }
-      return /^stage\b/i.test(match.stageLabel);
-    });
+    const manualMatches = Array.isArray(rawPage.manualPoints)
+      ? rawPage.manualPoints.map((point, ordinal) => ({
+          ordinal,
+          startIndex: ordinal,
+          endIndex: ordinal,
+          matchText: null,
+          sourceKind: 'manual-quest-point',
+          x: point.x,
+          y: point.y,
+          z: point.z,
+          stageLabel: point.label || `Stage ${ordinal + 1}`,
+        }))
+      : [];
+    const derivedCoordinates =
+      manualMatches.length > 0
+        ? manualMatches
+        : attachHeadingContext(rawPage.wikitext ?? '', [...templateMatches, ...inlineMatches]).filter((match) => {
+            if (match.sourceKind !== 'wiki-inline-coordinate') {
+              return true;
+            }
+            return /^stage\b/i.test(match.stageLabel);
+          });
+    const coordinates = derivedCoordinates;
 
     if (coordinates.length === 0) {
       continue;
@@ -993,7 +1248,12 @@ export function buildUnifiedMapData(locationRaw, wikiPagesRaw) {
     .map((point) => {
       const aliases = [...point.aliases.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]));
       const preferredNames = point.sourceRefs
-        .filter((source) => source.kind === 'official-marker' && typeof source.name === 'string' && normalizeName(source.name) !== 'location')
+        .filter(
+          (source) =>
+            (source.kind === 'official-marker' || source.kind === 'manual-marker') &&
+            typeof source.name === 'string' &&
+            normalizeName(source.name) !== 'location',
+        )
         .map((source) => source.name);
       const name = pickPrimaryAlias(point.aliases, preferredNames);
       return {
@@ -1045,6 +1305,7 @@ async function loadPreviousPayload() {
 
 export async function main() {
   const previous = await loadPreviousPayload();
+  const manualOverrides = await loadManualOverrides();
 
   let territoryRaw = previous.territoryRaw;
   let locationRaw = previous.locationRaw;
@@ -1086,13 +1347,14 @@ export async function main() {
     }
   }
 
-  const mapData = buildUnifiedMapData(locationRaw, wikiRaw.pages ?? []);
+  const mapData = buildUnifiedMapData(locationRaw, wikiRaw.pages ?? [], manualOverrides);
 
   const payload = {
     updatedAt: new Date().toISOString(),
     territoryRaw,
     locationRaw,
     wikiRaw,
+    manualOverrides,
     mapData,
   };
 

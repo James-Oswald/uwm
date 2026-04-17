@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, quest routes, and wiki-derived paths in a fast client-side viewer."
+      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, and quest routes in a fast client-side viewer."
     />
     <meta name="theme-color" content="#111827" />
     <link rel="canonical" href="https://james-oswald.github.io/uwm/" />
@@ -14,7 +14,7 @@
     <meta property="og:title" content="Unofficial Wynncraft Map" />
     <meta
       property="og:description"
-      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, quest routes, and wiki-derived paths in a fast client-side viewer."
+      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, and quest routes in a fast client-side viewer."
     />
     <meta property="og:url" content="https://james-oswald.github.io/uwm/" />
     <meta property="og:image" content="https://james-oswald.github.io/uwm/TopographicMap.png" />
@@ -26,7 +26,7 @@
     <meta name="twitter:title" content="Unofficial Wynncraft Map" />
     <meta
       name="twitter:description"
-      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, quest routes, and wiki-derived paths in a fast client-side viewer."
+      content="Explore the Unofficial Wynncraft Map with guild territories, important locations, and quest routes in a fast client-side viewer."
     />
     <meta name="twitter:image" content="https://james-oswald.github.io/uwm/TopographicMap.png" />
     <meta
@@ -64,7 +64,6 @@
       <div class="controls">
         <label><input id="toggle-territories" type="checkbox" /> Territories</label>
         <label><input id="toggle-locations" type="checkbox" checked /> Important locations</label>
-        <label><input id="toggle-paths" type="checkbox" checked /> Wiki paths</label>
         <label><input id="toggle-out-of-bounds-markers" type="checkbox" /> Out-of-bounds markers</label>
         <label><input id="toggle-location-labels" type="checkbox" /> Location labels</label>
         <label class="range-control" for="location-icon-size">
@@ -99,7 +98,15 @@
             </button>
           </div>
         </div>
-        <p class="side-menu-copy">Filter unified map points by type and use the legend to learn what each symbol means. Wiki-derived paths can be toggled from the top bar.</p>
+        <p class="side-menu-copy">
+          Filter unified map points by type and
+          <a
+            href="https://github.com/James-Oswald/uwm/issues/new?template=marker-override.yml"
+            target="_blank"
+            rel="noreferrer"
+            >click here to report an error</a
+          >.
+        </p>
         <div id="marker-legend" class="legend-list"></div>
       </aside>
 
@@ -117,7 +124,16 @@
             </button>
           </div>
         </div>
-        <p class="side-menu-copy">Quest markers stay separate from marker filters. Choose a quest here to show only that quest's route and points on the map.</p>
+        <p class="side-menu-copy">
+          Quest markers stay separate from marker filters. Choose a quest here to show only that quest's route and
+          points on the map, or
+          <a
+            href="https://github.com/James-Oswald/uwm/issues/new?template=quest-override.yml"
+            target="_blank"
+            rel="noreferrer"
+            >click here to report an error</a
+          >.
+        </p>
         <label class="select-control quest-select-control" for="quest-select">
           <span class="quest-select-label">Quest route</span>
           <select id="quest-select">

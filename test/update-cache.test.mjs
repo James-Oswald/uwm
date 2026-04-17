@@ -258,6 +258,62 @@ test('buildUnifiedMapData merges official markers with wiki points on the same c
 }
 );
 
+test('buildUnifiedMapData applies marker and quest overrides as replacements', () => {
+  const locationRaw = [
+    { name: 'Old Tower', icon: 'marker', x: 100, z: 200 },
+    { name: 'Keep Marker', icon: 'marker', x: 300, z: 400 },
+  ];
+
+  const wikiPages = [
+    {
+      pageId: 10,
+      title: 'Old Quest',
+      categories: ['Category:Quests'],
+      wikitext: `
+{{Infobox/Quest|name=Old Quest}}
+== Stage 1 ==
+{{Location|x=10|y=64|z=20}}
+== Stage 2 ==
+{{Location|x=30|y=64|z=40}}
+`,
+    },
+  ];
+
+  const mapData = buildUnifiedMapData(locationRaw, wikiPages, {
+    markersToDelete: [{ name: 'Old Tower', x: 100, z: 200 }],
+    markersToAdd: [{ name: 'New Tower', icon: 'marker', x: 101, y: 70, z: 201 }],
+    questsToDelete: ['Old Quest'],
+    questsToAdd: [
+      {
+        title: 'Old Quest',
+        points: [
+          { x: 500, y: 65, z: 600, label: 'Stage 1' },
+          { x: 700, y: 66, z: 800, label: 'Stage 2' },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(mapData.points.some((point) => point.name === 'Old Tower'), false);
+  assert.equal(mapData.points.some((point) => point.name === 'New Tower'), true);
+
+  const manualPoint = mapData.points.find((point) => point.name === 'New Tower');
+  assert.ok(manualPoint);
+  assert.ok(manualPoint.sourceKinds.includes('manual-marker'));
+
+  const oldQuestPage = mapData.pages.find((page) => page.title === 'Old Quest');
+  assert.ok(oldQuestPage);
+  assert.deepEqual(oldQuestPage.pointIds, ['point:500,600', 'point:700,800']);
+
+  const questPath = mapData.paths.find((path) => path.pageTitle === 'Old Quest');
+  assert.ok(questPath);
+  assert.deepEqual(questPath.pointIds, ['point:500,600', 'point:700,800']);
+
+  const replacedQuestPoint = mapData.points.find((point) => point.id === 'point:500,600');
+  assert.ok(replacedQuestPoint);
+  assert.ok(replacedQuestPoint.sourceKinds.includes('manual-quest-point'));
+});
+
 test('buildUnifiedMapData can build quest paths from RenderLocation entries', () => {
   const mapData = buildUnifiedMapData([], [
     {

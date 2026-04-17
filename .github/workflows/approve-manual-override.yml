@@ -1,0 +1,61 @@
+name: Approve Manual Override
+
+on:
+  issues:
+    types:
+      - labeled
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: approve-manual-override
+  cancel-in-progress: false
+
+jobs:
+  approve-manual-override:
+    if: github.event.label.name == 'approved-override'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Merge approved issue into manual overrides
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node ./scripts/merge-manual-override-issue.mjs
+
+      - name: Rebuild cache with approved manual overrides
+        run: node ./scripts/build-cache.mjs
+
+      - name: Commit updated manual overrides
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cache/manual-overrides.json cache/wynn-data.json
+          if git diff --cached --quiet; then
+            echo "No manual override changes to commit."
+            exit 0
+          fi
+          git commit -m "Approve manual override from issue #${{ github.event.issue.number }}"
+          git push origin HEAD:main
+
+      - name: Comment on approved issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: 'Approved override has been merged into `cache/manual-overrides.json` and `cache/wynn-data.json` has been rebuilt from the approved change.'
+            });

@@ -1,0 +1,75 @@
+name: Marker override request
+description: Request a manual marker removal, addition, or replacement in the cache build.
+title: "[Override][Marker]: "
+labels:
+  - cache-override
+  - marker-override
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Submit JSON arrays for the markers you want removed or added.
+        If you include both a removal and an addition for the same marker, the cache builder will treat it as a replacement on the next rebuild.
+        After review, apply the `approved-override` label to merge it into `cache/manual-overrides.json`.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Short explanation of what should change and why.
+      placeholder: The Maltic seaskipper marker is misplaced and should move one tile east.
+    validations:
+      required: true
+  - type: textarea
+    id: markers_to_delete
+    attributes:
+      label: Markers to delete
+      description: JSON array of marker matchers. Use `name`, `icon`, `x`, and `z` as needed.
+      value: |
+        [
+          {
+            "name": "Example Marker",
+            "x": 123,
+            "z": -456
+          }
+        ]
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: markers_to_add
+    attributes:
+      label: Markers to add
+      description: JSON array of marker objects. Each object should include `name`, `x`, and `z`. `icon` and `y` are optional.
+      value: |
+        [
+          {
+            "name": "Example Marker",
+            "icon": "marker",
+            "x": 124,
+            "y": 70,
+            "z": -456
+          }
+        ]
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: quests_to_delete
+    attributes:
+      label: Quests to delete
+      description: Leave this as `[]` for marker-only requests.
+      value: |
+        []
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: quests_to_add
+    attributes:
+      label: Quests to add
+      description: Leave this as `[]` for marker-only requests.
+      value: |
+        []
+      render: json
+    validations:
+      required: true

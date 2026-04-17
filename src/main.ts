@@ -1,55 +1,11 @@
-import { fitBoundsToAspect, imageToScreen, imageToWorld, screenToImage, worldToImage, zoomAt as zoomAtPoint } from "./alignment.js";
+import { imageToScreen, screenToImage, zoomAt as zoomAtPoint } from "./alignment.js";
 import type { Vec2 } from "./alignment.js";
 
-type TerritoryData = {
-  guild: {
-    name: string;
-    prefix: string;
-  };
-  location: {
-    start: [number, number];
-    end: [number, number];
-  };
-  acquired: string;
-};
-
-type LocationData = {
-  name: string;
-  icon: string;
-  x: number;
-  z: number;
-};
-
-type OverlayPoint = {
-  id: string;
-  name: string;
-  icon: string;
-  kind: string;
-  pageTitles: string[];
-  sourceKinds: string[];
-  world: Vec2;
-};
-
-type CachedMapPoint = {
-  id: string;
-  name: string;
-  icon: string;
-  kind: string;
-  x: number;
-  y?: number | null;
-  z: number;
-  pageTitles?: string[];
-  sourceKinds?: string[];
-};
-
-type CachedMapPath = {
-  id: string;
-  label: string;
-  kind: string;
-  pointIds: string[];
-  pageId?: number;
-  pageTitle?: string;
-};
+type TerritoryData = { guild: { name: string; prefix: string }; location: { start: [number, number]; end: [number, number] }; acquired: string };
+type LocationData = { name: string; icon: string; x: number; z: number };
+type OverlayPoint = { id: string; name: string; icon: string; kind: string; pageTitles: string[]; sourceKinds: string[]; world: Vec2 };
+type CachedMapPoint = { id: string; name: string; icon: string; kind: string; x: number; y?: number | null; z: number; pageTitles?: string[]; sourceKinds?: string[] };
+type CachedMapPath = { id: string; label: string; kind: string; pointIds: string[]; pageId?: number; pageTitle?: string };
 
 type CachedMapData = {
   points: CachedMapPoint[];
@@ -71,64 +27,25 @@ type CachedMapData = {
   };
 };
 
-type OverlayPath = {
-  id: string;
-  label: string;
-  kind: string;
-  pageTitle?: string;
-  points: Vec2[];
-};
-
-type QuestOption = {
-  key: string;
-  label: string;
-  pageType: string;
-  pointIds: string[];
-  startPointId: string | null;
-  pathId: string | null;
-};
-
-type QuestStageLocation = {
-  location: OverlayPoint;
-  stageNumber: number;
-};
+type OverlayPath = { id: string; label: string; kind: string; pageTitle?: string; points: Vec2[] };
+type QuestOption = { key: string; label: string; pageType: string; pointIds: string[]; startPointId: string | null; pathId: string | null };
+type QuestStageLocation = { location: OverlayPoint; stageNumber: number };
 
 type ActiveOverlayMode = "marker" | "quest";
 type MobileMenuKind = "markers" | "quests" | null;
 
-type MarkerVisual = {
-  key: string;
-  label: string;
-  description: string;
-  group: string;
-  fill: string;
-  stroke: string;
-  glyph: string;
-  shape: "circle" | "diamond" | "square" | "hex";
-};
-
-type OverlayTerritory = {
-  name: string;
-  guildName: string;
-  guildPrefix: string;
-  acquired: string;
-  start: Vec2;
-  end: Vec2;
-};
-
-type CachedPayload = {
-  updatedAt: string;
-  territoryRaw: unknown;
-  locationRaw: unknown;
-  wikiRaw?: unknown;
-  mapData?: CachedMapData;
-};
+type MarkerVisual = { key: string; label: string; description: string; group: string; fill: string; stroke: string; glyph: string; shape: "circle" | "diamond" | "square" | "hex" };
+type OverlayTerritory = { name: string; guildName: string; guildPrefix: string; acquired: string; start: Vec2; end: Vec2 };
+type CachedPayload = { updatedAt: string; territoryRaw: unknown; locationRaw: unknown; wikiRaw?: unknown; mapData?: CachedMapData };
+type MarkerRule = { key: keyof typeof MARKER_VISUALS; kind?: string; iconEquals?: string; nameEquals?: string; iconIncludes?: string[]; nameIncludes?: string[] };
+type PolylineStyle = { lineWidth: number; strokeStyle: string; lineDash?: number[] };
 
 const MAP_IMAGE_URL = "./TopographicMap.png";
 const BUNDLED_CACHE_URL = "./cache/wynn-data.json";
 const CACHE_STORAGE_KEY = "wynn-map-cached-data";
 const WIKI_ORIGIN = "https://wynncraft.wiki.gg";
-
+const LOCATION_COORDINATE_KEYS = new Set(["name", "icon", "x", "z", "y", "coords", "coord", "coordinates", "location", "position", "latitude", "longitude"]);
+const $ = <T extends Element>(selector: string): T => document.querySelector<T>(selector)!;
 
 const EMPTY_CACHE_PAYLOAD: CachedPayload = {
   updatedAt: new Date(0).toISOString(),
@@ -165,31 +82,30 @@ const MAP_CALIBRATION = {
 
 const colorCache = new Map<string, string>();
 
-const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
-const territoriesToggle = document.querySelector<HTMLInputElement>("#toggle-territories")!;
-const locationsToggle = document.querySelector<HTMLInputElement>("#toggle-locations")!;
-const pathsToggle = document.querySelector<HTMLInputElement>("#toggle-paths")!;
-const outOfBoundsMarkersToggle = document.querySelector<HTMLInputElement>("#toggle-out-of-bounds-markers")!;
-const locationLabelsToggle = document.querySelector<HTMLInputElement>("#toggle-location-labels")!;
-const locationIconSizeInput = document.querySelector<HTMLInputElement>("#location-icon-size")!;
-const locationIconSizeValue = document.querySelector<HTMLOutputElement>("#location-icon-size-value")!;
-const questSelect = document.querySelector<HTMLSelectElement>("#quest-select")!;
-const questStageSummary = document.querySelector<HTMLParagraphElement>("#quest-stage-summary")!;
-const questStageList = document.querySelector<HTMLOListElement>("#quest-stage-list")!;
-const markerLegend = document.querySelector<HTMLDivElement>("#marker-legend")!;
-const legendToggleAllBtn = document.querySelector<HTMLButtonElement>("#legend-toggle-all")!;
-const clearQuestSelectionBtn = document.querySelector<HTMLButtonElement>("#clear-quest-selection")!;
-const mobileMarkerMenuToggleBtn = document.querySelector<HTMLButtonElement>("#mobile-marker-menu-toggle")!;
-const mobileQuestMenuToggleBtn = document.querySelector<HTMLButtonElement>("#mobile-quest-menu-toggle")!;
-const mobileMenuCloseBtn = document.querySelector<HTMLButtonElement>("#mobile-menu-close")!;
-const mobileQuestMenuCloseBtn = document.querySelector<HTMLButtonElement>("#mobile-quest-menu-close")!;
-const mobileMenuBackdrop = document.querySelector<HTMLDivElement>("#mobile-menu-backdrop")!;
-const sideMenu = document.querySelector<HTMLElement>("#side-menu")!;
-const questMenu = document.querySelector<HTMLElement>("#quest-menu")!;
-const mouseWorldCoordsEl = document.querySelector<HTMLSpanElement>("#mouse-world-coords")!;
-const mouseImageCoordsEl = document.querySelector<HTMLSpanElement>("#mouse-image-coords")!;
-const resetBtn = document.querySelector<HTMLButtonElement>("#reset-view")!;
-const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
+const canvas = $<HTMLCanvasElement>("#map-canvas");
+const territoriesToggle = $<HTMLInputElement>("#toggle-territories");
+const locationsToggle = $<HTMLInputElement>("#toggle-locations");
+const outOfBoundsMarkersToggle = $<HTMLInputElement>("#toggle-out-of-bounds-markers");
+const locationLabelsToggle = $<HTMLInputElement>("#toggle-location-labels");
+const locationIconSizeInput = $<HTMLInputElement>("#location-icon-size");
+const locationIconSizeValue = $<HTMLOutputElement>("#location-icon-size-value");
+const questSelect = $<HTMLSelectElement>("#quest-select");
+const questStageSummary = $<HTMLParagraphElement>("#quest-stage-summary");
+const questStageList = $<HTMLOListElement>("#quest-stage-list");
+const markerLegend = $<HTMLDivElement>("#marker-legend");
+const legendToggleAllBtn = $<HTMLButtonElement>("#legend-toggle-all");
+const clearQuestSelectionBtn = $<HTMLButtonElement>("#clear-quest-selection");
+const mobileMarkerMenuToggleBtn = $<HTMLButtonElement>("#mobile-marker-menu-toggle");
+const mobileQuestMenuToggleBtn = $<HTMLButtonElement>("#mobile-quest-menu-toggle");
+const mobileMenuCloseBtn = $<HTMLButtonElement>("#mobile-menu-close");
+const mobileQuestMenuCloseBtn = $<HTMLButtonElement>("#mobile-quest-menu-close");
+const mobileMenuBackdrop = $<HTMLDivElement>("#mobile-menu-backdrop");
+const sideMenu = $<HTMLElement>("#side-menu");
+const questMenu = $<HTMLElement>("#quest-menu");
+const mouseWorldCoordsEl = $<HTMLSpanElement>("#mouse-world-coords");
+const mouseImageCoordsEl = $<HTMLSpanElement>("#mouse-image-coords");
+const resetBtn = $<HTMLButtonElement>("#reset-view");
+const statusEl = $<HTMLParagraphElement>("#status");
 
 const ctx = canvas.getContext("2d")!;
 
@@ -209,10 +125,8 @@ let dragMoved = false;
 
 let territories: OverlayTerritory[] = [];
 let markerLocations: OverlayPoint[] = [];
-let markerPaths: OverlayPath[] = [];
 let questLocationById = new Map<string, OverlayPoint>();
 let questPathByKey = new Map<string, OverlayPath>();
-let bounds = { ...MAP_WORLD_BOUNDS };
 let hoveredLabel = "";
 let viewportWidth = 0;
 let viewportHeight = 0;
@@ -239,6 +153,7 @@ const MARKER_TYPE_ORDER = [
   "travel-fast",
   "travel-seaskipper",
   "travel-balloon",
+  "blacksmith",
   "potion",
   "scroll-merchant",
   "merchant",
@@ -291,6 +206,45 @@ const MARKER_GROUP_META: Record<string, { label: string; description: string }> 
     description: "Everything else that does not fit a main group",
   },
 };
+
+const MARKER_VISUALS = {
+  quest: { key: "quest", label: "Quests", description: "Quest starts and quest-path waypoints", group: "activities", fill: "#8b5cf6", stroke: "#f5ebff", glyph: "?", shape: "circle" },
+  location: { key: "location", label: "Locations", description: "Named world locations and map markers", group: "other", fill: "#facc15", stroke: "#111827", glyph: "•", shape: "circle" },
+  bank: { key: "bank", label: "Banks", description: "Banks, emerald merchants, and liquid merchants", group: "vendors", fill: "#22c55e", stroke: "#ecfdf5", glyph: "◆", shape: "diamond" },
+  potion: { key: "potion", label: "Potions", description: "Potion merchants", group: "vendors", fill: "#ef4444", stroke: "#fff1f2", glyph: "!", shape: "circle" },
+  "travel-fast": { key: "travel-fast", label: "Fast Travel", description: "Direct fast-travel points", group: "travel", fill: "#0ea5e9", stroke: "#eff6ff", glyph: "✦", shape: "square" },
+  "travel-seaskipper": { key: "travel-seaskipper", label: "Sea Skipper", description: "Sea skipper travel routes", group: "travel", fill: "#0284c7", stroke: "#e0f2fe", glyph: "⚓", shape: "square" },
+  "travel-balloon": { key: "travel-balloon", label: "Housing Balloon", description: "Housing air balloon transport", group: "services", fill: "#7dd3fc", stroke: "#f0f9ff", glyph: "◌", shape: "circle" },
+  blacksmith: { key: "blacksmith", label: "Blacksmiths", description: "Blacksmiths and equipment repair services", group: "services", fill: "#92400e", stroke: "#fef3c7", glyph: "⚒", shape: "square" },
+  "scroll-merchant": { key: "scroll-merchant", label: "Scroll Merchants", description: "Teleport and utility scroll vendors", group: "vendors", fill: "#c08457", stroke: "#fff7ed", glyph: "S", shape: "diamond" },
+  merchant: { key: "merchant", label: "Vendors", description: "Shops, buyers, and general vendors", group: "vendors", fill: "#f59e0b", stroke: "#fffbeb", glyph: "$", shape: "square" },
+  identifier: { key: "identifier", label: "Identifiers", description: "Item identifiers and related services", group: "services", fill: "#14b8a6", stroke: "#f0fdfa", glyph: "i", shape: "circle" },
+  station: { key: "station", label: "Stations", description: "Profession crafting stations", group: "services", fill: "#06b6d4", stroke: "#ecfeff", glyph: "●", shape: "hex" },
+  cave: { key: "cave", label: "Caves", description: "Caves and cave entrances", group: "hazards", fill: "#78716c", stroke: "#fafaf9", glyph: "▲", shape: "hex" },
+  dungeon: { key: "dungeon", label: "Dungeons", description: "Dungeon entrances and dungeon merchants", group: "hazards", fill: "#475569", stroke: "#f8fafc", glyph: "☠", shape: "hex" },
+  "boss-altar": { key: "boss-altar", label: "Boss Altars", description: "Boss altars and altar encounters", group: "hazards", fill: "#991b1b", stroke: "#fee2e2", glyph: "✦", shape: "hex" },
+  raid: { key: "raid", label: "Raids", description: "Raid entrances and corrupted dungeons", group: "hazards", fill: "#7f1d1d", stroke: "#fecaca", glyph: "☠", shape: "hex" },
+  misc: { key: "misc", label: "Other", description: "Everything else", group: "other", fill: "#facc15", stroke: "#111827", glyph: "•", shape: "circle" },
+} as const satisfies Record<string, MarkerVisual>;
+
+const MARKER_RULES: MarkerRule[] = [
+  { key: "location", kind: "location", iconEquals: "marker" },
+  { key: "quest", iconIncludes: ["quest"], nameIncludes: ["quest"] },
+  { key: "bank", iconIncludes: ["emerald"], nameIncludes: ["bank", "emerald merchant", "liquid merchant"] },
+  { key: "potion", iconIncludes: ["potion"] },
+  { key: "travel-fast", iconIncludes: ["fasttravel"], nameEquals: "fast travel" },
+  { key: "travel-seaskipper", iconIncludes: ["seaskipper"], nameIncludes: ["seaskipper", "sea skipper"] },
+  { key: "travel-balloon", iconIncludes: ["housingairballoon"], nameIncludes: ["balloon"] },
+  { key: "scroll-merchant", iconIncludes: ["merchant_scroll", "scroll"], nameIncludes: ["scroll merchant", "scrolls"] },
+  { key: "blacksmith", iconIncludes: ["blacksmith"], nameIncludes: ["blacksmith"] },
+  { key: "merchant", iconIncludes: ["weapon", "armour"], nameIncludes: ["merchant"] },
+  { key: "identifier", iconIncludes: ["identifier"] },
+  { key: "station", iconIncludes: ["profession"], nameIncludes: ["station"] },
+  { key: "cave", iconIncludes: ["cave"], nameEquals: "cave" },
+  { key: "dungeon", iconIncludes: ["dungeon"], nameIncludes: ["dungeon"] },
+  { key: "boss-altar", iconIncludes: ["bossaltar"], nameIncludes: ["boss altar"] },
+  { key: "raid", iconIncludes: ["raid", "corrupteddungeon"] },
+];
 
 function worldToMapImage(point: Vec2): { x: number; y: number } {
   return {
@@ -376,213 +330,19 @@ function classifyMarkerVisual(location: OverlayPoint): MarkerVisual {
   const name = location.name.toLowerCase();
 
   if (location.kind === "quest") {
-    return {
-      key: "quest",
-      label: "Quests",
-      description: "Quest starts and quest-path waypoints",
-      group: "activities",
-      fill: "#8b5cf6",
-      stroke: "#f5ebff",
-      glyph: "?",
-      shape: "circle",
-    };
+    return MARKER_VISUALS.quest;
   }
-  if (location.kind === "location" && icon === "marker") {
-    return {
-      key: "location",
-      label: "Locations",
-      description: "Named world locations and wiki coordinate points",
-      group: "other",
-      fill: "#facc15",
-      stroke: "#111827",
-      glyph: "•",
-      shape: "circle",
-    };
+  for (const rule of MARKER_RULES) {
+    const matchesKind = !rule.kind || location.kind === rule.kind;
+    const matchesIconEquals = !rule.iconEquals || icon === rule.iconEquals;
+    const matchesNameEquals = !rule.nameEquals || name === rule.nameEquals;
+    const matchesIconIncludes = !rule.iconIncludes || rule.iconIncludes.some((value) => icon.includes(value));
+    const matchesNameIncludes = !rule.nameIncludes || rule.nameIncludes.some((value) => name.includes(value));
+    if (matchesKind && matchesIconEquals && matchesNameEquals && matchesIconIncludes && matchesNameIncludes) {
+      return MARKER_VISUALS[rule.key];
+    }
   }
-  if (icon.includes("quest") || name.includes("quest")) {
-    return {
-      key: "quest",
-      label: "Quests",
-      description: "Quest starts and mini quests",
-      group: "activities",
-      fill: "#8b5cf6",
-      stroke: "#f5ebff",
-      glyph: "?",
-      shape: "circle",
-    };
-  }
-  if (icon.includes("emerald") || name.includes("bank") || name.includes("emerald merchant")) {
-    return {
-      key: "bank",
-      label: "Banks",
-      description: "Banks and emerald merchants",
-      group: "vendors",
-      fill: "#22c55e",
-      stroke: "#ecfdf5",
-      glyph: "◆",
-      shape: "diamond",
-    };
-  }
-  if (icon.includes("potion")) {
-    return {
-      key: "potion",
-      label: "Potions",
-      description: "Potion and liquid merchants",
-      group: "vendors",
-      fill: "#ef4444",
-      stroke: "#fff1f2",
-      glyph: "!",
-      shape: "circle",
-    };
-  }
-  if (icon.includes("fasttravel") || name === "fast travel") {
-    return {
-      key: "travel-fast",
-      label: "Fast Travel",
-      description: "Direct fast-travel points",
-      group: "travel",
-      fill: "#0ea5e9",
-      stroke: "#eff6ff",
-      glyph: "✦",
-      shape: "square",
-    };
-  }
-  if (icon.includes("seaskipper") || name.includes("seaskipper") || name.includes("sea skipper")) {
-    return {
-      key: "travel-seaskipper",
-      label: "Sea Skipper",
-      description: "Sea skipper travel routes",
-      group: "travel",
-      fill: "#0284c7",
-      stroke: "#e0f2fe",
-      glyph: "⚓",
-      shape: "square",
-    };
-  }
-  if (icon.includes("housingairballoon") || name.includes("balloon")) {
-    return {
-      key: "travel-balloon",
-      label: "Housing Balloon",
-      description: "Housing air balloon transport",
-      group: "travel",
-      fill: "#7dd3fc",
-      stroke: "#f0f9ff",
-      glyph: "◌",
-      shape: "circle",
-    };
-  }
-  if (
-    icon.includes("merchant_scroll") ||
-    icon.includes("scroll") ||
-    name.includes("scroll merchant") ||
-    name.includes("scrolls")
-  ) {
-    return {
-      key: "scroll-merchant",
-      label: "Scroll Merchants",
-      description: "Teleport and utility scroll vendors",
-      group: "vendors",
-      fill: "#c08457",
-      stroke: "#fff7ed",
-      glyph: "S",
-      shape: "diamond",
-    };
-  }
-  if (icon.includes("blacksmith") || icon.includes("weapon") || icon.includes("armour") || name.includes("merchant")) {
-    return {
-      key: "merchant",
-      label: "Vendors",
-      description: "Shops, buyers, and general vendors",
-      group: "vendors",
-      fill: "#f59e0b",
-      stroke: "#fffbeb",
-      glyph: "$",
-      shape: "square",
-    };
-  }
-  if (icon.includes("identifier")) {
-    return {
-      key: "identifier",
-      label: "Identifiers",
-      description: "Item identifiers and related services",
-      group: "services",
-      fill: "#14b8a6",
-      stroke: "#f0fdfa",
-      glyph: "i",
-      shape: "circle",
-    };
-  }
-  if (icon.includes("profession") || name.includes("station")) {
-    return {
-      key: "station",
-      label: "Stations",
-      description: "Profession crafting stations",
-      group: "crafting",
-      fill: "#06b6d4",
-      stroke: "#ecfeff",
-      glyph: "●",
-      shape: "hex",
-    };
-  }
-  if (icon.includes("cave") || name === "cave") {
-    return {
-      key: "cave",
-      label: "Caves",
-      description: "Caves and cave entrances",
-      group: "hazards",
-      fill: "#78716c",
-      stroke: "#fafaf9",
-      glyph: "▲",
-      shape: "hex",
-    };
-  }
-  if (icon.includes("dungeon") || name.includes("dungeon")) {
-    return {
-      key: "dungeon",
-      label: "Dungeons",
-      description: "Dungeon entrances and dungeon merchants",
-      group: "hazards",
-      fill: "#475569",
-      stroke: "#f8fafc",
-      glyph: "☠",
-      shape: "hex",
-    };
-  }
-  if (icon.includes("bossaltar") || name.includes("boss altar")) {
-    return {
-      key: "boss-altar",
-      label: "Boss Altars",
-      description: "Boss altars and altar encounters",
-      group: "hazards",
-      fill: "#991b1b",
-      stroke: "#fee2e2",
-      glyph: "✦",
-      shape: "hex",
-    };
-  }
-  if (icon.includes("raid") || icon.includes("corrupteddungeon")) {
-    return {
-      key: "raid",
-      label: "Raids",
-      description: "Raid entrances and corrupted dungeons",
-      group: "hazards",
-      fill: "#7f1d1d",
-      stroke: "#fecaca",
-      glyph: "☠",
-      shape: "hex",
-    };
-  }
-
-  return {
-    key: "misc",
-    label: "Other",
-    description: "Everything else",
-    group: "other",
-    fill: "#facc15",
-    stroke: "#111827",
-    glyph: "•",
-    shape: "circle",
-  };
+  return MARKER_VISUALS.misc;
 }
 
 function drawMarkerShape(screenX: number, screenY: number, size: number, visual: MarkerVisual): void {
@@ -776,6 +536,40 @@ function getVisibleQuestPathPoints(): Vec2[] {
     return [];
   }
   return activeQuestPath.points.filter((point) => shouldShowOutOfBoundsMarkers() || isPointWithinMapBounds(point));
+}
+
+function pointToScreen(point: Vec2): { x: number; y: number } {
+  return imageToScreen(worldToMapImage(point), { scale, offsetX, offsetY });
+}
+
+function drawPointLabel(text: string, screenX: number, screenY: number, markerSize: number): void {
+  ctx.fillStyle = "#f1f5f9";
+  ctx.font = `${Math.max(10, Math.min(14, scale * 0.9))}px sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(text, screenX + markerSize / 2 + 4, screenY - markerSize / 2);
+}
+
+function drawPolyline(points: Vec2[], style: PolylineStyle): void {
+  if (points.length < 2) {
+    return;
+  }
+
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    const screen = pointToScreen(point);
+    if (index === 0) {
+      ctx.moveTo(screen.x, screen.y);
+    } else {
+      ctx.lineTo(screen.x, screen.y);
+    }
+  });
+  ctx.lineWidth = style.lineWidth;
+  ctx.strokeStyle = style.strokeStyle;
+  ctx.setLineDash(style.lineDash ?? []);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.stroke();
 }
 
 function clearQuestStageHover(): void {
@@ -1278,20 +1072,7 @@ function normalizeLocations(locationRaw: unknown): LocationData[] {
     }
 
     for (const [key, nested] of Object.entries(obj)) {
-      if (
-        key === "name" ||
-        key === "icon" ||
-        key === "x" ||
-        key === "z" ||
-        key === "y" ||
-        key === "coords" ||
-        key === "coord" ||
-        key === "coordinates" ||
-        key === "location" ||
-        key === "position" ||
-        key === "latitude" ||
-        key === "longitude"
-      ) {
+      if (LOCATION_COORDINATE_KEYS.has(key)) {
         continue;
       }
       visit(nested, key);
@@ -1429,26 +1210,17 @@ function buildQuestStageList(): void {
     meta.append(name, coords);
     button.append(indexBadge, meta);
 
-    const syncHoverState = (isHovered: boolean): void => {
+    const setHoverState = (isHovered: boolean): void => {
       button.classList.toggle("is-hovered", isHovered);
+      if (isHovered) {
+        setHoveredQuestPoint(location.id);
+      } else {
+        clearQuestStageHover();
+      }
     };
 
-    button.addEventListener("pointerenter", () => {
-      setHoveredQuestPoint(location.id);
-      syncHoverState(true);
-    });
-    button.addEventListener("pointerleave", () => {
-      clearQuestStageHover();
-      syncHoverState(false);
-    });
-    button.addEventListener("focus", () => {
-      setHoveredQuestPoint(location.id);
-      syncHoverState(true);
-    });
-    button.addEventListener("blur", () => {
-      clearQuestStageHover();
-      syncHoverState(false);
-    });
+    ["pointerenter", "focus"].forEach((type) => button.addEventListener(type, () => setHoverState(true)));
+    ["pointerleave", "blur"].forEach((type) => button.addEventListener(type, () => setHoverState(false)));
     button.addEventListener("click", () => {
       setActiveOverlayMode("quest");
       setHoveredQuestPoint(location.id);
@@ -1486,10 +1258,6 @@ function shouldRenderLocation(location: OverlayPoint): boolean {
     return false;
   }
   return true;
-}
-
-function shouldRenderPath(path: OverlayPath): boolean {
-  return activeOverlayMode === "marker" && path.kind !== "quest-path";
 }
 
 function applyRawData(territoryRaw: unknown, locationRaw: unknown, mapData?: CachedPayload["mapData"]): void {
@@ -1541,7 +1309,6 @@ function applyRawData(territoryRaw: unknown, locationRaw: unknown, mapData?: Cac
     questLocationById = new Map(
       allPoints.filter((point) => questPointIds.has(point.id)).map((point) => [point.id, point]),
     );
-    markerPaths = allPaths.filter((path) => path.kind !== "quest-path");
     questPathByKey = new Map(
       allPaths
         .filter((path) => path.kind === "quest-path" && typeof path.pageTitle === "string")
@@ -1561,13 +1328,11 @@ function applyRawData(territoryRaw: unknown, locationRaw: unknown, mapData?: Cac
         sourceKinds: ["official-marker"],
         world: { x: entry.x, z: entry.z },
       }));
-    markerPaths = [];
     questLocationById = new Map();
     questPathByKey = new Map();
     questOptions = [];
   }
 
-  updateWorldBounds();
   buildLegend();
   syncQuestSelectionControl();
   buildQuestStageList();
@@ -1580,11 +1345,6 @@ function formatDateTime(isoDate: string): string {
   }
   return parsed.toLocaleString();
 }
-
-function updateWorldBounds(): void {
-  bounds = { ...MAP_WORLD_BOUNDS };
-}
-
 
 function getScaleToFitViewport(): number {
   if (!MAP_IMAGE_CONTENT_BOX.width || !MAP_IMAGE_CONTENT_BOX.height) {
@@ -1676,61 +1436,11 @@ function drawTerritories(): void {
 
 function drawPaths(): void {
   if (activeOverlayMode === "quest") {
-    const pointsToDraw = getVisibleQuestPathPoints();
-    if (pointsToDraw.length < 2) {
-      return;
-    }
-
-    ctx.beginPath();
-    for (const [index, point] of pointsToDraw.entries()) {
-      const image = worldToMapImage(point);
-      const screen = imageToScreen(image, { scale, offsetX, offsetY });
-      if (index === 0) {
-        ctx.moveTo(screen.x, screen.y);
-      } else {
-        ctx.lineTo(screen.x, screen.y);
-      }
-    }
-
-    ctx.lineWidth = Math.max(1.5, scale * 0.55);
-    ctx.strokeStyle = "rgba(139, 92, 246, 0.72)";
-    ctx.setLineDash([]);
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.stroke();
+    drawPolyline(getVisibleQuestPathPoints(), {
+      lineWidth: Math.max(1.5, scale * 0.55),
+      strokeStyle: "rgba(139, 92, 246, 0.72)",
+    });
     return;
-  }
-
-  if (!pathsToggle.checked) {
-    return;
-  }
-
-  for (const path of markerPaths) {
-    if (!shouldRenderPath(path)) {
-      continue;
-    }
-    const pointsToDraw = path.points.filter((point) => shouldShowOutOfBoundsMarkers() || isPointWithinMapBounds(point));
-    if (pointsToDraw.length < 2) {
-      continue;
-    }
-    ctx.beginPath();
-
-    for (const [index, point] of pointsToDraw.entries()) {
-      const image = worldToMapImage(point);
-      const screen = imageToScreen(image, { scale, offsetX, offsetY });
-      if (index === 0) {
-        ctx.moveTo(screen.x, screen.y);
-      } else {
-        ctx.lineTo(screen.x, screen.y);
-      }
-    }
-
-    ctx.lineWidth = path.kind === "quest-path" ? Math.max(1.5, scale * 0.55) : Math.max(1, scale * 0.35);
-    ctx.strokeStyle = path.kind === "quest-path" ? "rgba(139, 92, 246, 0.72)" : "rgba(148, 163, 184, 0.55)";
-    ctx.setLineDash(path.kind === "quest-path" ? [] : [5, 4]);
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.stroke();
   }
 
   ctx.setLineDash([]);
@@ -1746,19 +1456,13 @@ function drawLocations(): void {
     const iconSize = Math.max(8, Math.min(48, locationIconSize));
 
     for (const { location, stageNumber } of activeQuestStages) {
-      const image = worldToMapImage(location.world);
-      const screen = imageToScreen(image, { scale, offsetX, offsetY });
+      const screen = pointToScreen(location.world);
       const isHoveredStage = hoveredQuestPointId === location.id;
       const drawSize = isHoveredStage ? Math.min(56, iconSize + 8) : iconSize;
       drawQuestStageMarker(screen.x, screen.y, drawSize, stageNumber, isHoveredStage);
 
       if (locationLabelsToggle.checked && scale > minScale * 2.1) {
-        ctx.fillStyle = "#f1f5f9";
-        ctx.font = `${Math.max(10, Math.min(14, scale * 0.9))}px sans-serif`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "alphabetic";
-        const labelOffset = drawSize / 2;
-        ctx.fillText(location.name, screen.x + labelOffset + 4, screen.y - labelOffset);
+        drawPointLabel(location.name, screen.x, screen.y, drawSize);
       }
     }
     return;
@@ -1775,8 +1479,7 @@ function drawLocations(): void {
     if (!shouldRenderLocation(location)) {
       continue;
     }
-    const image = worldToMapImage(location.world);
-    const screen = imageToScreen(image, { scale, offsetX, offsetY });
+    const screen = pointToScreen(location.world);
     const visual = classifyMarkerVisual(location);
     if (!isMarkerTypeEnabled(visual.key)) {
       continue;
@@ -1785,28 +1488,18 @@ function drawLocations(): void {
     drawMarkerGlyph(screen.x, screen.y, iconSize, visual);
 
     if (locationLabelsToggle.checked && scale > minScale * 2.1) {
-      ctx.fillStyle = "#f1f5f9";
-      ctx.font = `${Math.max(10, Math.min(14, scale * 0.9))}px sans-serif`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "alphabetic";
-      ctx.fillText(location.name, screen.x + halfIconSize + 4, screen.y - halfIconSize);
+      drawPointLabel(location.name, screen.x, screen.y, iconSize);
     }
   }
 
   for (const { quest, location } of getVisibleQuestStarts()) {
-    const image = worldToMapImage(location.world);
-    const screen = imageToScreen(image, { scale, offsetX, offsetY });
+    const screen = pointToScreen(location.world);
     const visual = classifyMarkerVisual(location);
     drawMarkerShape(screen.x, screen.y, iconSize, visual);
     drawMarkerGlyph(screen.x, screen.y, iconSize, visual);
 
     if (locationLabelsToggle.checked && scale > minScale * 2.1) {
-      ctx.fillStyle = "#f1f5f9";
-      ctx.font = `${Math.max(10, Math.min(14, scale * 0.9))}px sans-serif`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "alphabetic";
-      const labelOffset = iconSize / 2;
-      ctx.fillText(quest.label, screen.x + labelOffset + 4, screen.y - labelOffset);
+      drawPointLabel(quest.label, screen.x, screen.y, iconSize);
     }
   }
 }
@@ -1884,10 +1577,13 @@ function screenToWorld(screenX: number, screenY: number): { x: number; z: number
   return mapImageToWorld(imagePoint);
 }
 
-function updateHover(clientX: number, clientY: number): void {
+function getCanvasPoint(clientX: number, clientY: number): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
-  const x = clientX - rect.left;
-  const y = clientY - rect.top;
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+function updateHover(clientX: number, clientY: number): void {
+  const { x, y } = getCanvasPoint(clientX, clientY);
   const image = screenToImage({ x, y }, { scale, offsetX, offsetY });
   const world = screenToWorld(x, y);
   setCoordinateReadout(world, image);
@@ -1935,15 +1631,12 @@ function findClickedQuestStart(clientX: number, clientY: number): QuestOption | 
     return null;
   }
 
-  const rect = canvas.getBoundingClientRect();
-  const x = clientX - rect.left;
-  const y = clientY - rect.top;
+  const { x, y } = getCanvasPoint(clientX, clientY);
   const hitRadius = Math.max(10, Math.min(28, locationIconSize * 0.85));
   let bestMatch: { quest: QuestOption; distance: number } | null = null;
 
   for (const entry of getVisibleQuestStarts()) {
-    const image = worldToMapImage(entry.location.world);
-    const screen = imageToScreen(image, { scale, offsetX, offsetY });
+    const screen = pointToScreen(entry.location.world);
     const distance = Math.hypot(screen.x - x, screen.y - y);
     if (distance > hitRadius) {
       continue;
@@ -2010,22 +1703,19 @@ async function refreshCache(): Promise<void> {
   applyRawData(baseCache.territoryRaw, baseCache.locationRaw, baseCache.mapData);
   const cacheStoreError = setStoredCache(baseCache);
   const totalVisiblePoints = markerLocations.length + questLocationById.size;
-  const totalVisiblePaths = markerPaths.length + questPathByKey.size;
-  const pathSummary = totalVisiblePaths > 0 ? `, ${totalVisiblePaths.toLocaleString()} paths` : "";
-  const wikiSummary =
+  const questPathSummary = questPathByKey.size > 0 ? `, ${questPathByKey.size.toLocaleString()} quest routes` : "";
+  const supplementalCoordinateSummary =
     baseCache.mapData?.stats && baseCache.mapData.stats.wikiCoordinateCount > 0
-      ? `, ${baseCache.mapData.stats.wikiCoordinateCount.toLocaleString()} wiki coordinates`
+      ? `, ${baseCache.mapData.stats.wikiCoordinateCount.toLocaleString()} supplemental coordinates`
       : "";
   const cacheStoreSummary = cacheStoreError ? ` Browser cache save skipped: ${cacheStoreError}.` : "";
-  baseStatusMessage = `Loaded ${territories.length.toLocaleString()} territories, ${totalVisiblePoints.toLocaleString()} points${pathSummary}${wikiSummary} from cached data (${formatDateTime(baseCache.updatedAt)}).${cacheStoreSummary}`;
+  baseStatusMessage = `Loaded ${territories.length.toLocaleString()} territories, ${totalVisiblePoints.toLocaleString()} points${questPathSummary}${supplementalCoordinateSummary} from cached data (${formatDateTime(baseCache.updatedAt)}).${cacheStoreSummary}`;
   updateStatus();
   draw();
 }
 
 canvas.addEventListener("pointerdown", (event) => {
-  const rect = canvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
+  const { x, y } = getCanvasPoint(event.clientX, event.clientY);
 
   isDragging = true;
   dragMoved = false;
@@ -2036,9 +1726,7 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  const rect = canvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
+  const { x, y } = getCanvasPoint(event.clientX, event.clientY);
 
   if (isDragging) {
     if (Math.abs(x - (dragStartX + offsetX)) > 4 || Math.abs(y - (dragStartY + offsetY)) > 4) {
@@ -2098,10 +1786,7 @@ canvas.addEventListener(
   "wheel",
   (event) => {
     event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-
+    const { x, y } = getCanvasPoint(event.clientX, event.clientY);
     const delta = Math.sign(event.deltaY);
     const factor = delta < 0 ? 1.1 : 0.9;
     zoomAt(x, y, factor);
@@ -2110,12 +1795,7 @@ canvas.addEventListener(
 );
 
 territoriesToggle.addEventListener("change", draw);
-locationsToggle.addEventListener("change", () => {
-  setActiveOverlayMode("marker");
-});
-pathsToggle.addEventListener("change", () => {
-  setActiveOverlayMode("marker");
-});
+[locationsToggle].forEach((element) => element.addEventListener("change", () => setActiveOverlayMode("marker")));
 outOfBoundsMarkersToggle.addEventListener("change", () => {
   buildLegend();
   buildQuestStageList();
@@ -2155,9 +1835,10 @@ locationIconSizeInput.addEventListener("input", () => {
 });
 legendToggleAllBtn.addEventListener("click", () => {
   const checkboxes = markerLegend.querySelectorAll<HTMLInputElement>('input[data-type-key]');
+  const shouldEnableAll = Array.from(checkboxes).every((checkbox) => !checkbox.checked);
   enabledMarkerTypes.clear();
   for (const checkbox of checkboxes) {
-    checkbox.checked = !checkbox.checked;
+    checkbox.checked = shouldEnableAll;
     const typeKey = checkbox.dataset.typeKey;
     if (!typeKey) {
       continue;
@@ -2179,9 +1860,7 @@ legendToggleAllBtn.addEventListener("click", () => {
   hoveredLabel = "";
   draw();
 });
-sideMenu.addEventListener("change", () => {
-  setActiveOverlayMode("marker");
-});
+sideMenu.addEventListener("change", () => setActiveOverlayMode("marker"));
 sideMenu.addEventListener("click", (event) => {
   const target = event.target;
   if (target instanceof HTMLElement && target.closest("button, input, label, summary")) {
@@ -2202,21 +1881,9 @@ questMenu.addEventListener("click", (event) => {
     setActiveOverlayMode("quest");
   }
 });
-mobileMarkerMenuToggleBtn.addEventListener("click", () => {
-  setMobileMenuOpen(openMobileMenu === "markers" ? null : "markers");
-});
-mobileMenuCloseBtn.addEventListener("click", () => {
-  setMobileMenuOpen(null);
-});
-mobileQuestMenuToggleBtn.addEventListener("click", () => {
-  setMobileMenuOpen(openMobileMenu === "quests" ? null : "quests");
-});
-mobileQuestMenuCloseBtn.addEventListener("click", () => {
-  setMobileMenuOpen(null);
-});
-mobileMenuBackdrop.addEventListener("click", () => {
-  setMobileMenuOpen(null);
-});
+mobileMarkerMenuToggleBtn.addEventListener("click", () => setMobileMenuOpen(openMobileMenu === "markers" ? null : "markers"));
+mobileQuestMenuToggleBtn.addEventListener("click", () => setMobileMenuOpen(openMobileMenu === "quests" ? null : "quests"));
+[mobileMenuCloseBtn, mobileQuestMenuCloseBtn, mobileMenuBackdrop].forEach((element) => element.addEventListener("click", () => setMobileMenuOpen(null)));
 resetBtn.addEventListener("click", resetView);
 window.addEventListener("resize", () => {
   syncMobileMenuForViewport();
