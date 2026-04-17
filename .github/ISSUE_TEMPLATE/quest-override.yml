@@ -1,5 +1,5 @@
 name: Quest override / fix request
-description: Request a manual quest removal, addition, or replacement in the cache build. Note that quests are scrapted from the wiki and thus we prefer you fix them there first, and changes will make their way here eventially. This should only be used in events where wiki fixes are impossible due to quest structure etc.
+description: Request a manual quest removal, addition, or replacement in the cache build.
 title: "Override [Quest]: "
 labels:
   - cache-override
@@ -9,6 +9,8 @@ body:
     attributes:
       value: |
         Submit quest overrides only in this form.
+        Quests are scraped from the wiki, so prefer fixing the wiki first when possible.
+        Use this override flow when a wiki fix is not practical because of quest structure or similar limitations.
         If you include both a deletion and an addition for the same quest, the cache builder will treat that as a replacement.
         After review, apply the `approved-override` label to merge it into `overrides/manual-overrides.json`.
   - type: textarea
