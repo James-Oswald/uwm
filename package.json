@@ -16,7 +16,7 @@
     "scrape:wiki": "node ./scripts/wiki-backup.mjs",
     "build:cache": "node ./scripts/build-cache.mjs",
     "update-cache": "npm run scrape:wiki && npm run build:cache",
-    "test:jest": "jest",
+    "test:jest": "npm run build && node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.config.cjs",
     "test": "npm run build && node --test test/*.test.mjs"
   }
 }
