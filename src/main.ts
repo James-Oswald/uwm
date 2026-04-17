@@ -30,6 +30,7 @@ type CachedMapData = {
 type OverlayPath = { id: string; label: string; kind: string; pageTitle?: string; points: Vec2[] };
 type QuestOption = { key: string; label: string; pageType: string; pointIds: string[]; startPointId: string | null; pathId: string | null };
 type QuestStageLocation = { location: OverlayPoint; stageNumber: number };
+type MarkerModeEntry = { location: OverlayPoint; hoverLabel: string; pointLabel: string; questKey: string | null };
 
 type ActiveOverlayMode = "marker" | "quest";
 type MobileMenuKind = "markers" | "quests" | null;
@@ -155,8 +156,6 @@ let hoveredQuestPointId = "";
 let baseStatusMessage = "Loading map data...";
 let activeOverlayMode: ActiveOverlayMode = "marker";
 let openMobileMenu: MobileMenuKind = null;
-let questStartsEnabled = true;
-
 const mobileMenuMediaQuery = window.matchMedia("(max-width: 980px)");
 
 const MARKER_TYPE_ORDER = [
@@ -518,7 +517,7 @@ function getQuestStartLocation(quest: QuestOption): OverlayPoint | null {
 }
 
 function getVisibleQuestStarts(): Array<{ quest: QuestOption; location: OverlayPoint }> {
-  if (!questStartsEnabled) {
+  if (!isMarkerTypeEnabled("quest")) {
     return [];
   }
   return questOptions
@@ -726,9 +725,7 @@ function buildLegend(): void {
 
   if (!hasInitializedMarkerTypes) {
     for (const entry of entries) {
-      if (entry.visual.key !== "quest") {
-        enabledMarkerTypes.add(entry.visual.key);
-      }
+      enabledMarkerTypes.add(entry.visual.key);
     }
     hasInitializedMarkerTypes = true;
   }
@@ -777,14 +774,10 @@ function buildLegend(): void {
         if (!typeKey) {
           continue;
         }
-        if (typeKey === "quest") {
-          questStartsEnabled = groupToggle.checked;
+        if (groupToggle.checked) {
+          enabledMarkerTypes.add(typeKey);
         } else {
-          if (groupToggle.checked) {
-            enabledMarkerTypes.add(typeKey);
-          } else {
-            enabledMarkerTypes.delete(typeKey);
-          }
+          enabledMarkerTypes.delete(typeKey);
         }
       }
       syncGroupToggle();
@@ -795,17 +788,12 @@ function buildLegend(): void {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.dataset.typeKey = entry.visual.key;
-      const isQuestStartEntry = entry.visual.key === "quest";
-      checkbox.checked = isQuestStartEntry ? questStartsEnabled : enabledMarkerTypes.has(entry.visual.key);
+      checkbox.checked = enabledMarkerTypes.has(entry.visual.key);
       checkbox.addEventListener("change", () => {
-        if (isQuestStartEntry) {
-          questStartsEnabled = checkbox.checked;
+        if (checkbox.checked) {
+          enabledMarkerTypes.add(entry.visual.key);
         } else {
-          if (checkbox.checked) {
-            enabledMarkerTypes.add(entry.visual.key);
-          } else {
-            enabledMarkerTypes.delete(entry.visual.key);
-          }
+          enabledMarkerTypes.delete(entry.visual.key);
         }
         syncGroupToggle();
         draw();
@@ -1268,7 +1256,7 @@ function buildQuestStageList(): void {
 }
 
 function revealQuestStartInLeftMenu(questKey: string): void {
-  questStartsEnabled = true;
+  enabledMarkerTypes.add("quest");
   buildLegend();
   setActiveOverlayMode("marker");
   setMobileMenuOpen("markers");
@@ -1508,9 +1496,8 @@ function drawLocations(): void {
   }
 
   const iconSize = Math.max(8, Math.min(48, locationIconSize));
-  const halfIconSize = iconSize / 2;
-
-  for (const location of markerLocations) {
+  for (const entry of getMarkerModeEntries()) {
+    const { location, pointLabel } = entry;
     if (!shouldRenderLocation(location)) {
       continue;
     }
@@ -1523,18 +1510,7 @@ function drawLocations(): void {
     drawMarkerGlyph(screen.x, screen.y, iconSize, visual);
 
     if (locationLabelsToggle.checked && scale > minScale * 2.1) {
-      drawPointLabel(location.name, screen.x, screen.y, iconSize);
-    }
-  }
-
-  for (const { quest, location } of getVisibleQuestStarts()) {
-    const screen = pointToScreen(location.world);
-    const visual = classifyMarkerVisual(location);
-    drawMarkerShape(screen.x, screen.y, iconSize, visual);
-    drawMarkerGlyph(screen.x, screen.y, iconSize, visual);
-
-    if (locationLabelsToggle.checked && scale > minScale * 2.1) {
-      drawPointLabel(quest.label, screen.x, screen.y, iconSize);
+      drawPointLabel(pointLabel, screen.x, screen.y, iconSize);
     }
   }
 }
@@ -1596,6 +1572,32 @@ function draw(): void {
   drawHoverLabel();
 }
 
+function formatMarkerHoverLabel(location: OverlayPoint): string {
+  const pageHint = location.pageTitles[0] && location.pageTitles[0] !== location.name ? ` • ${location.pageTitles[0]}` : "";
+  return `${location.name}${pageHint} (${Math.round(location.world.x)}, ${Math.round(location.world.z)})`;
+}
+
+function getMarkerModeEntries(): MarkerModeEntry[] {
+  if (!locationsToggle.checked) {
+    return [];
+  }
+
+  const markerEntries = markerLocations.map((location) => ({
+    location,
+    hoverLabel: formatMarkerHoverLabel(location),
+    pointLabel: location.name,
+    questKey: null,
+  }));
+  const questStartEntries = getVisibleQuestStarts().map(({ quest, location }) => ({
+    location,
+    hoverLabel: formatMarkerHoverLabel(location),
+    pointLabel: location.name,
+    questKey: quest.key,
+  }));
+
+  return [...markerEntries, ...questStartEntries];
+}
+
 function resizeCanvas(): void {
   const dpr = window.devicePixelRatio || 1;
   devicePixelRatioScale = dpr;
@@ -1626,24 +1628,9 @@ function updateHover(clientX: number, clientY: number): void {
   let bestDistance = Infinity;
   let bestName = "";
 
-  const hoverLocations =
-    activeOverlayMode === "quest"
-      ? getActiveQuestLocations()
-      : [...markerLocations, ...getVisibleQuestStarts().map((entry) => entry.location)];
-
-  if ((activeOverlayMode === "quest" && hoverLocations.length > 0) || (activeOverlayMode === "marker" && locationsToggle.checked)) {
-    for (const location of hoverLocations) {
-      if (activeOverlayMode === "marker" && !shouldRenderLocation(location)) {
-        continue;
-      }
-      if (
-        activeOverlayMode === "quest" &&
-        (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world))
-      ) {
-        continue;
-      }
-      const visual = classifyMarkerVisual(location);
-      if (activeOverlayMode === "marker" && !isMarkerTypeEnabled(visual.key)) {
+  if (activeOverlayMode === "quest") {
+    for (const location of getActiveQuestLocations()) {
+      if (!shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(location.world)) {
         continue;
       }
       const dx = location.world.x - world.x;
@@ -1651,8 +1638,25 @@ function updateHover(clientX: number, clientY: number): void {
       const distance = Math.hypot(dx, dz);
       if (distance < bestDistance && distance < 55 / Math.max(scale, 0.4)) {
         bestDistance = distance;
-        const pageHint = location.pageTitles[0] && location.pageTitles[0] !== location.name ? ` • ${location.pageTitles[0]}` : "";
-        bestName = `${location.name}${pageHint} (${Math.round(location.world.x)}, ${Math.round(location.world.z)})`;
+        bestName = formatMarkerHoverLabel(location);
+      }
+    }
+  } else {
+    for (const entry of getMarkerModeEntries()) {
+      const { location, hoverLabel } = entry;
+      if (!shouldRenderLocation(location)) {
+        continue;
+      }
+      const visual = classifyMarkerVisual(location);
+      if (!isMarkerTypeEnabled(visual.key)) {
+        continue;
+      }
+      const dx = location.world.x - world.x;
+      const dz = location.world.z - world.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance < bestDistance && distance < 55 / Math.max(scale, 0.4)) {
+        bestDistance = distance;
+        bestName = hoverLabel;
       }
     }
   }
@@ -1662,26 +1666,33 @@ function updateHover(clientX: number, clientY: number): void {
 }
 
 function findClickedQuestStart(clientX: number, clientY: number): QuestOption | null {
-  if (activeOverlayMode !== "marker" || !locationsToggle.checked || !questStartsEnabled) {
+  if (activeOverlayMode !== "marker" || !locationsToggle.checked || !isMarkerTypeEnabled("quest")) {
     return null;
   }
 
   const { x, y } = getCanvasPoint(clientX, clientY);
   const hitRadius = Math.max(10, Math.min(28, locationIconSize * 0.85));
-  let bestMatch: { quest: QuestOption; distance: number } | null = null;
+  let bestMatch: { questKey: string; distance: number } | null = null;
 
-  for (const entry of getVisibleQuestStarts()) {
+  for (const entry of getMarkerModeEntries()) {
+    if (!entry.questKey || !shouldRenderLocation(entry.location)) {
+      continue;
+    }
+    const visual = classifyMarkerVisual(entry.location);
+    if (!isMarkerTypeEnabled(visual.key)) {
+      continue;
+    }
     const screen = pointToScreen(entry.location.world);
     const distance = Math.hypot(screen.x - x, screen.y - y);
     if (distance > hitRadius) {
       continue;
     }
     if (!bestMatch || distance < bestMatch.distance) {
-      bestMatch = { quest: entry.quest, distance };
+      bestMatch = { questKey: entry.questKey, distance };
     }
   }
 
-  return bestMatch?.quest ?? null;
+  return questOptions.find((quest) => quest.key === bestMatch?.questKey) ?? null;
 }
 
 function applyMobileMenuState(): void {
@@ -1875,10 +1886,6 @@ legendToggleAllBtn.addEventListener("click", () => {
     checkbox.checked = shouldEnableAll;
     const typeKey = checkbox.dataset.typeKey;
     if (!typeKey) {
-      continue;
-    }
-    if (typeKey === "quest") {
-      questStartsEnabled = checkbox.checked;
       continue;
     }
     if (checkbox.checked) {
