@@ -2,7 +2,7 @@
 
 A fully client-side TypeScript web app that:
 
-- renders `TopographicMap.png` on an HTML canvas,
+- renders `TopographicMap.png` from the wiki on an HTML canvas,
 - supports drag-to-pan and wheel-to-zoom,
 - overlays guild territories, unified map points, and quest routes,
 - reads pre-generated cached data from `cache/wynn-data.json` (no frontend API calls).
@@ -16,7 +16,7 @@ npm run serve
 
 Then open `http://localhost:4173`.
 
-## Cache strategy (no backend required)
+## Cache strategy
 
 The browser only uses cached payloads:
 
