@@ -165,7 +165,7 @@ const MARKER_TYPE_ORDER = [
   "bank",
   "travel-fast",
   "travel-seaskipper",
-  "housing-ballon",
+  "housing-balloon",
   "blacksmith",
   "potion",
   "scroll-merchant",
@@ -191,53 +191,53 @@ const MARKER_GROUP_ORDER = [
 
 const MARKER_GROUP_META: Record<string, { label: string; description: string }> = {
   activities: {
-    label: "Activities",
-    description: "Quest-related objectives and progression markers",
+    label: "Quests",
+    description: "",
   },
   travel: {
     label: "Travel",
-    description: "Fast travel, sea travel, and other transit points",
+    description: "",
   },
   vendors: {
     label: "Vendors",
-    description: "Banks, merchants, and shopping-related services",
+    description: "",
   },
   services: {
     label: "Services",
-    description: "Identifiers and other utility NPCs",
+    description: "",
   },
   crafting: {
     label: "Crafting",
-    description: "Profession stations and production areas",
+    description: "",
   },
   hazards: {
     label: "Hazards",
-    description: "Caves, dungeons, boss altars, and raids",
+    description: "",
   },
   other: {
     label: "Other",
-    description: "Everything else that does not fit a main group",
+    description: "",
   },
 };
 
 const MARKER_VISUALS = {
-  quest: { key: "quest", label: "Quests", description: "Quest starts and quest-path waypoints", group: "activities", fill: "#8b5cf6", stroke: "#f5ebff", glyph: "?", shape: "circle" },
-  location: { key: "location", label: "Locations", description: "Named world locations and map markers", group: "other", fill: "#facc15", stroke: "#111827", glyph: "•", shape: "circle" },
-  bank: { key: "bank", label: "Banks", description: "Banks, emerald merchants, and liquid merchants", group: "vendors", fill: "#22c55e", stroke: "#ecfdf5", glyph: "◆", shape: "diamond" },
-  potion: { key: "potion", label: "Potions", description: "Potion merchants", group: "vendors", fill: "#ef4444", stroke: "#fff1f2", glyph: "!", shape: "circle" },
-  "travel-fast": { key: "travel-fast", label: "Fast Travel", description: "Direct fast-travel points", group: "travel", fill: "#0ea5e9", stroke: "#eff6ff", glyph: "✦", shape: "square" },
-  "travel-seaskipper": { key: "travel-seaskipper", label: "Sea Skipper", description: "Sea skipper travel routes", group: "travel", fill: "#0284c7", stroke: "#e0f2fe", glyph: "⚓", shape: "square" },
-  "housing-ballon": { key: "housing-ballon", label: "Housing Ballon", description: "Housing ballon", group: "services", fill: "#7dd3fc", stroke: "#f0f9ff", glyph: "◌", shape: "circle" },
-  blacksmith: { key: "blacksmith", label: "Blacksmiths", description: "Blacksmiths and equipment repair services", group: "services", fill: "#92400e", stroke: "#fef3c7", glyph: "⚒", shape: "square" },
-  "scroll-merchant": { key: "scroll-merchant", label: "Scroll Merchants", description: "Teleport and utility scroll vendors", group: "vendors", fill: "#c08457", stroke: "#fff7ed", glyph: "S", shape: "diamond" },
-  merchant: { key: "merchant", label: "Vendors", description: "Shops, buyers, and general vendors", group: "vendors", fill: "#f59e0b", stroke: "#fffbeb", glyph: "$", shape: "square" },
-  identifier: { key: "identifier", label: "Identifiers", description: "Item identifiers and related services", group: "services", fill: "#14b8a6", stroke: "#f0fdfa", glyph: "i", shape: "circle" },
-  station: { key: "station", label: "Stations", description: "Profession crafting stations", group: "services", fill: "#06b6d4", stroke: "#ecfeff", glyph: "●", shape: "hex" },
-  cave: { key: "cave", label: "Caves", description: "Caves and cave entrances", group: "hazards", fill: "#78716c", stroke: "#fafaf9", glyph: "▲", shape: "hex" },
-  dungeon: { key: "dungeon", label: "Dungeons", description: "Dungeon entrances and dungeon merchants", group: "hazards", fill: "#475569", stroke: "#f8fafc", glyph: "☠", shape: "hex" },
-  "boss-altar": { key: "boss-altar", label: "Boss Altars", description: "Boss altars and altar encounters", group: "hazards", fill: "#991b1b", stroke: "#fee2e2", glyph: "✦", shape: "hex" },
-  raid: { key: "raid", label: "Raids", description: "Raid entrances and corrupted dungeons", group: "hazards", fill: "#7f1d1d", stroke: "#fecaca", glyph: "☠", shape: "hex" },
-  misc: { key: "misc", label: "Other", description: "Everything else", group: "other", fill: "#facc15", stroke: "#111827", glyph: "•", shape: "circle" },
+  quest: { key: "quest", label: "Quests", description: "", group: "activities", fill: "#8b5cf6", stroke: "#f5ebff", glyph: "?", shape: "circle" },
+  location: { key: "location", label: "Locations", description: "", group: "other", fill: "#facc15", stroke: "#111827", glyph: "•", shape: "circle" },
+  bank: { key: "bank", label: "Banks", description: "", group: "vendors", fill: "#22c55e", stroke: "#ecfdf5", glyph: "◆", shape: "diamond" },
+  potion: { key: "potion", label: "Potions", description: "", group: "vendors", fill: "#ef4444", stroke: "#fff1f2", glyph: "!", shape: "circle" },
+  "travel-fast": { key: "travel-fast", label: "Fast Travel", description: "", group: "travel", fill: "#0ea5e9", stroke: "#eff6ff", glyph: "✦", shape: "square" },
+  "travel-seaskipper": { key: "travel-seaskipper", label: "Sea Skipper", description: "", group: "travel", fill: "#0284c7", stroke: "#e0f2fe", glyph: "⚓", shape: "square" },
+  "housing-balloon": { key: "housing-balloon", label: "Housing Balloon", description: "", group: "services", fill: "#7dd3fc", stroke: "#f0f9ff", glyph: "◌", shape: "circle" },
+  blacksmith: { key: "blacksmith", label: "Blacksmiths", description: "", group: "services", fill: "#92400e", stroke: "#fef3c7", glyph: "⚒", shape: "square" },
+  "scroll-merchant": { key: "scroll-merchant", label: "Scroll Merchants", description: "", group: "vendors", fill: "#c08457", stroke: "#fff7ed", glyph: "S", shape: "diamond" },
+  merchant: { key: "merchant", label: "Vendors", description: "", group: "vendors", fill: "#f59e0b", stroke: "#fffbeb", glyph: "$", shape: "square" },
+  identifier: { key: "identifier", label: "Identifiers", description: "", group: "services", fill: "#14b8a6", stroke: "#f0fdfa", glyph: "i", shape: "circle" },
+  station: { key: "station", label: "Stations", description: "", group: "services", fill: "#06b6d4", stroke: "#ecfeff", glyph: "●", shape: "hex" },
+  cave: { key: "cave", label: "Caves", description: "", group: "hazards", fill: "#78716c", stroke: "#fafaf9", glyph: "▲", shape: "hex" },
+  dungeon: { key: "dungeon", label: "Dungeons", description: "", group: "hazards", fill: "#475569", stroke: "#f8fafc", glyph: "☠", shape: "hex" },
+  "boss-altar": { key: "boss-altar", label: "Boss Altars", description: "", group: "hazards", fill: "#991b1b", stroke: "#fee2e2", glyph: "✦", shape: "hex" },
+  raid: { key: "raid", label: "Raids", description: "", group: "hazards", fill: "#7f1d1d", stroke: "#fecaca", glyph: "☠", shape: "hex" },
+  misc: { key: "misc", label: "Other", description: "", group: "other", fill: "#facc15", stroke: "#111827", glyph: "•", shape: "circle" },
 } as const satisfies Record<string, MarkerVisual>;
 
 const MARKER_RULES: MarkerRule[] = [
@@ -247,7 +247,7 @@ const MARKER_RULES: MarkerRule[] = [
   { key: "potion", iconIncludes: ["potion"] },
   { key: "travel-fast", iconIncludes: ["fasttravel"], nameEquals: "fast travel" },
   { key: "travel-seaskipper", iconIncludes: ["seaskipper"], nameIncludes: ["seaskipper", "sea skipper"] },
-  { key: "housing-ballon", iconIncludes: ["housingairballoon"], nameIncludes: ["balloon"] },
+  { key: "housing-balloon", iconIncludes: ["housingairballoon"], nameIncludes: ["balloon"] },
   { key: "scroll-merchant", iconIncludes: ["merchant_scroll", "scroll"], nameIncludes: ["scroll merchant", "scrolls"] },
   { key: "blacksmith", iconIncludes: ["blacksmith"], nameIncludes: ["blacksmith"] },
   { key: "merchant", iconIncludes: ["weapon", "armour"], nameIncludes: ["merchant"] },
@@ -855,7 +855,7 @@ function buildLegend(): void {
 
       const groupDescription = document.createElement("span");
       groupDescription.className = "legend-group-desc";
-      groupDescription.textContent = entry.visual.label;
+      groupDescription.textContent = "";
 
       singleMeta.append(groupName, groupDescription);
 

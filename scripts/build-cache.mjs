@@ -53,7 +53,7 @@ const SUPPORTED_MANUAL_MARKER_ICONS = new Set([
   'bank',
   'travel-fast',
   'travel-seaskipper',
-  'housing-ballon',
+  'housing-balloon',
   'blacksmith',
   'potion',
   'scroll-merchant',
@@ -299,7 +299,7 @@ function tagsForManualMarkerIcon(icon) {
     case 'scroll-merchant':
     case 'merchant':
     case 'identifier':
-    case 'housing-ballon':
+    case 'housing-balloon':
     case 'blacksmith':
     case 'station':
       return ['manual-override', 'service'];
