@@ -7,6 +7,9 @@ describe("page load smoke test", () => {
     const html = fs.readFileSync(path.join(__dirname, "..", "..", "index.html"), "utf8");
 
     expect(html).toContain("Press C to copy cords");
+    expect(html).toContain('id="custom-coordinate-input"');
+    expect(html).toContain("x, z or x, y, z");
+    expect(html).toContain("Clear all markers");
     expect(html).not.toContain('id="mouse-image-coords"');
   });
 

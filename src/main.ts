@@ -1,5 +1,6 @@
 import { imageToScreen, screenToImage, zoomAt as zoomAtPoint } from "./alignment.js";
 import type { Vec2 } from "./alignment.js";
+import { parseCoordinateInput } from "./coordinates.js";
 
 type TerritoryData = { guild: { name: string; prefix: string }; location: { start: [number, number]; end: [number, number] }; acquired: string };
 type LocationData = { name: string; icon: string; x: number; z: number };
@@ -92,6 +93,9 @@ const outOfBoundsMarkersToggle = $<HTMLInputElement>("#toggle-out-of-bounds-mark
 const locationLabelsToggle = $<HTMLInputElement>("#toggle-location-labels");
 const locationIconSizeInput = $<HTMLInputElement>("#location-icon-size");
 const locationIconSizeValue = $<HTMLOutputElement>("#location-icon-size-value");
+const customCoordinateForm = $<HTMLFormElement>("#custom-coordinate-form");
+const customCoordinateInput = $<HTMLInputElement>("#custom-coordinate-input");
+const clearCustomCoordinateBtn = $<HTMLButtonElement>("#clear-custom-coordinate");
 const questSelect = $<HTMLSelectElement>("#quest-select");
 const questStageSummary = $<HTMLParagraphElement>("#quest-stage-summary");
 const questStageList = $<HTMLOListElement>("#quest-stage-list");
@@ -135,6 +139,7 @@ let viewportHeight = 0;
 let devicePixelRatioScale = 1;
 let locationIconSize = Number(locationIconSizeInput.value) || 18;
 let lastPointerWorld: { x: number; z: number } | null = null;
+let customMarkerLocations: OverlayPoint[] = [];
 const enabledMarkerTypes = new Set<string>();
 let hasInitializedMarkerTypes = false;
 let questOptions: QuestOption[] = [];
@@ -147,6 +152,7 @@ const mobileMenuMediaQuery = window.matchMedia("(max-width: 980px)");
 
 const MARKER_TYPE_ORDER = [
   "quest",
+  "custom",
   "location",
   "bank",
   "travel-fast",
@@ -208,6 +214,7 @@ const MARKER_GROUP_META: Record<string, { label: string; description: string }> 
 
 const MARKER_VISUALS = {
   quest: { key: "quest", label: "Quests", description: "", group: "activities", fill: "#8b5cf6", stroke: "#f5ebff", glyph: "?", shape: "circle" },
+  custom: { key: "custom", label: "Custom Marker", description: "", group: "other", fill: "#f97316", stroke: "#fff7ed", glyph: "+", shape: "diamond" },
   location: { key: "location", label: "Locations", description: "", group: "other", fill: "#facc15", stroke: "#111827", glyph: "•", shape: "circle" },
   bank: { key: "bank", label: "Banks", description: "", group: "vendors", fill: "#22c55e", stroke: "#ecfdf5", glyph: "◆", shape: "diamond" },
   potion: { key: "potion", label: "Potions", description: "", group: "vendors", fill: "#ef4444", stroke: "#fff1f2", glyph: "!", shape: "circle" },
@@ -278,6 +285,10 @@ function updateLocationIconSizeLabel(): void {
   locationIconSizeValue.textContent = `${locationIconSize}px`;
 }
 
+function updateCustomCoordinateControls(): void {
+  clearCustomCoordinateBtn.disabled = customMarkerLocations.length === 0;
+}
+
 function isPointWithinMapBounds(point: Vec2): boolean {
   return (
     point.x >= MAP_WORLD_BOUNDS.minX &&
@@ -291,6 +302,18 @@ function shouldShowOutOfBoundsMarkers(): boolean {
   return outOfBoundsMarkersToggle.checked;
 }
 
+function createCustomMarkerLocation(x: number, z: number): OverlayPoint {
+  return {
+    id: `custom:${x}:${z}`,
+    name: "Custom Marker",
+    icon: "custom",
+    kind: "custom",
+    pageTitles: [],
+    sourceKinds: ["custom-coordinate"],
+    world: { x, z },
+  };
+}
+
 function setCoordinateReadout(world?: CoordinateWorldPoint, image?: CoordinateImagePoint): void {
   if (!world || !image) {
     lastPointerWorld = null;
@@ -302,13 +325,21 @@ function setCoordinateReadout(world?: CoordinateWorldPoint, image?: CoordinateIm
   mouseWorldCoordsEl.textContent = `x ${Math.round(world.x)}, z ${Math.round(world.z)}`;
 }
 
+function formatCoordinateNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatCoordinatePair(x: number, z: number): string {
+  return `x ${formatCoordinateNumber(x)}, z ${formatCoordinateNumber(z)}`;
+}
+
 async function copyCurrentCoordinates(): Promise<void> {
   if (!lastPointerWorld) {
     setStatus("Move the mouse over the map before copying coordinates.");
     return;
   }
 
-  const payload = `x ${Math.round(lastPointerWorld.x)}, z ${Math.round(lastPointerWorld.z)}`;
+  const payload = formatCoordinatePair(Math.round(lastPointerWorld.x), Math.round(lastPointerWorld.z));
 
   try {
     await navigator.clipboard.writeText(payload);
@@ -316,6 +347,90 @@ async function copyCurrentCoordinates(): Promise<void> {
   } catch {
     setStatus("Could not copy cords to the clipboard.");
   }
+}
+
+function focusPointsOnMap(pointsToFit: Vec2[]): void {
+  if (pointsToFit.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+    return;
+  }
+
+  const imagePoints = pointsToFit.map((point) => worldToMapImage(point));
+  let left = Math.min(...imagePoints.map((point) => point.x));
+  let right = Math.max(...imagePoints.map((point) => point.x));
+  let top = Math.min(...imagePoints.map((point) => point.y));
+  let bottom = Math.max(...imagePoints.map((point) => point.y));
+
+  if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
+    return;
+  }
+
+  const minSpan = 140;
+  if (right - left < minSpan) {
+    const delta = (minSpan - (right - left)) / 2;
+    left -= delta;
+    right += delta;
+  }
+  if (bottom - top < minSpan) {
+    const delta = (minSpan - (bottom - top)) / 2;
+    top -= delta;
+    bottom += delta;
+  }
+
+  const padding = Math.max(64, Math.min(viewportWidth, viewportHeight) * 0.12);
+  left -= padding;
+  right += padding;
+  top -= padding;
+  bottom += padding;
+
+  const width = Math.max(1, right - left);
+  const height = Math.max(1, bottom - top);
+  const availableWidth = Math.max(120, viewportWidth);
+  const availableHeight = Math.max(120, viewportHeight);
+  const nextScale = Math.max(minScale, Math.min(maxScale, Math.min(availableWidth / width, availableHeight / height)));
+
+  scale = nextScale;
+  offsetX = (viewportWidth - width * scale) / 2 - left * scale;
+  offsetY = (viewportHeight - height * scale) / 2 - top * scale;
+  draw();
+}
+
+function setCustomMarkerFromInput(rawInput: string): void {
+  const parsed = parseCoordinateInput(rawInput);
+  if (!parsed) {
+    setStatus('Enter custom coordinates as "x, z" or "x, y, z".');
+    return;
+  }
+
+  const nextMarker = createCustomMarkerLocation(parsed.x, parsed.z);
+  const alreadyExists = customMarkerLocations.some((location) => location.id === nextMarker.id);
+  if (!alreadyExists) {
+    customMarkerLocations = [...customMarkerLocations, nextMarker];
+  }
+  enabledMarkerTypes.add("custom");
+  buildLegend();
+  updateCustomCoordinateControls();
+  setActiveOverlayMode("marker");
+  focusPointsOnMap([nextMarker.world]);
+
+  const outOfBoundsHint = !shouldShowOutOfBoundsMarkers() && !isPointWithinMapBounds(nextMarker.world)
+    ? ' The marker is outside the default map bounds, so turn on "Out-of-bounds markers" to view it.'
+    : "";
+  const duplicateHint = alreadyExists ? " That marker was already on the map." : "";
+  setStatus(`Placed custom marker at ${formatCoordinatePair(parsed.x, parsed.z)}.${duplicateHint}${outOfBoundsHint}`);
+}
+
+function clearCustomMarker(): void {
+  if (customMarkerLocations.length === 0) {
+    updateCustomCoordinateControls();
+    return;
+  }
+
+  customMarkerLocations = [];
+  hoveredLabel = "";
+  buildLegend();
+  updateCustomCoordinateControls();
+  updateStatus();
+  draw();
 }
 
 function classifyMarkerVisual(location: OverlayPoint): MarkerVisual {
@@ -587,49 +702,7 @@ function setHoveredQuestPoint(pointId: string): void {
 function focusQuestOnMap(): void {
   const questLocations = getActiveQuestLocations();
   const questPathPoints = getVisibleQuestPathPoints();
-  const pointsToFit = [...questLocations.map((location) => location.world), ...questPathPoints];
-  if (pointsToFit.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) {
-    return;
-  }
-
-  const imagePoints = pointsToFit.map((point) => worldToMapImage(point));
-  let left = Math.min(...imagePoints.map((point) => point.x));
-  let right = Math.max(...imagePoints.map((point) => point.x));
-  let top = Math.min(...imagePoints.map((point) => point.y));
-  let bottom = Math.max(...imagePoints.map((point) => point.y));
-
-  if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) {
-    return;
-  }
-
-  const minSpan = 140;
-  if (right - left < minSpan) {
-    const delta = (minSpan - (right - left)) / 2;
-    left -= delta;
-    right += delta;
-  }
-  if (bottom - top < minSpan) {
-    const delta = (minSpan - (bottom - top)) / 2;
-    top -= delta;
-    bottom += delta;
-  }
-
-  const padding = Math.max(64, Math.min(viewportWidth, viewportHeight) * 0.12);
-  left -= padding;
-  right += padding;
-  top -= padding;
-  bottom += padding;
-
-  const width = Math.max(1, right - left);
-  const height = Math.max(1, bottom - top);
-  const availableWidth = Math.max(120, viewportWidth);
-  const availableHeight = Math.max(120, viewportHeight);
-  const nextScale = Math.max(minScale, Math.min(maxScale, Math.min(availableWidth / width, availableHeight / height)));
-
-  scale = nextScale;
-  offsetX = (viewportWidth - width * scale) / 2 - left * scale;
-  offsetY = (viewportHeight - height * scale) / 2 - top * scale;
-  draw();
+  focusPointsOnMap([...questLocations.map((location) => location.world), ...questPathPoints]);
 }
 
 function setActiveOverlayMode(nextMode: ActiveOverlayMode): void {
@@ -659,6 +732,16 @@ function buildLegend(): void {
     } else {
       counts.set(visual.key, { visual, count: 1 });
     }
+  }
+
+  const visibleCustomMarkerCount = customMarkerLocations.filter(
+    (location) => shouldShowOutOfBoundsMarkers() || isPointWithinMapBounds(location.world),
+  ).length;
+  if (visibleCustomMarkerCount > 0) {
+    counts.set("custom", {
+      visual: classifyMarkerVisual(customMarkerLocations[0]),
+      count: visibleCustomMarkerCount,
+    });
   }
 
   const visibleQuestStartCount = questOptions.reduce((count, quest) => count + (getQuestStartLocation(quest) ? 1 : 0), 0);
@@ -896,6 +979,9 @@ function setStatus(message: string): void {
 }
 
 function updateStatus(): void {
+  const customMarkerMessage = customMarkerLocations.length > 0
+    ? ` ${customMarkerLocations.length.toLocaleString()} custom marker${customMarkerLocations.length === 1 ? "" : "s"} active.`
+    : "";
   const questMessage =
     activeOverlayMode === "quest"
       ? selectedQuestKey
@@ -906,7 +992,7 @@ function updateStatus(): void {
       : selectedQuestKey
         ? ` Marker mode is active. Quest markers for ${selectedQuestKey} are hidden until you use the quest menu again.`
         : "";
-  setStatus(`${baseStatusMessage}${questMessage}`);
+  setStatus(`${baseStatusMessage}${customMarkerMessage}${questMessage}`);
 }
 
 async function loadBundledCache(): Promise<CachedPayload> {
@@ -1556,8 +1642,14 @@ function getMarkerModeEntries(): MarkerModeEntry[] {
     pointLabel: location.name,
     questKey: quest.key,
   }));
+  const customEntries = customMarkerLocations.map((location, index) => ({
+    location,
+    hoverLabel: formatMarkerHoverLabel(location),
+    pointLabel: customMarkerLocations.length > 1 ? `Custom Marker ${index + 1}` : location.name,
+    questKey: null,
+  }));
 
-  return [...markerEntries, ...questStartEntries];
+  return [...markerEntries, ...customEntries, ...questStartEntries];
 }
 
 function resizeCanvas(): void {
@@ -1840,6 +1932,13 @@ locationIconSizeInput.addEventListener("input", () => {
   updateLocationIconSizeLabel();
   draw();
 });
+customCoordinateForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  setCustomMarkerFromInput(customCoordinateInput.value);
+});
+clearCustomCoordinateBtn.addEventListener("click", () => {
+  clearCustomMarker();
+});
 legendToggleAllBtn.addEventListener("click", () => {
   const checkboxes = markerLegend.querySelectorAll<HTMLInputElement>('input[data-type-key]');
   const shouldEnableAll = Array.from(checkboxes).every((checkbox) => !checkbox.checked);
@@ -1900,6 +1999,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 updateLocationIconSizeLabel();
+updateCustomCoordinateControls();
 setCoordinateReadout();
 syncMobileMenuForViewport();
 

@@ -70,6 +70,21 @@
           <input id="location-icon-size" type="range" min="10" max="32" step="1" value="18" />
           <output id="location-icon-size-value" for="location-icon-size">18px</output>
         </label>
+        <form id="custom-coordinate-form" class="custom-coordinate-form">
+          <label class="custom-coordinate-control" for="custom-coordinate-input">
+            <span>Custom marker</span>
+            <input
+              id="custom-coordinate-input"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="x, z or x, y, z"
+            />
+          </label>
+          <button id="set-custom-coordinate" type="submit">Set marker</button>
+          <button id="clear-custom-coordinate" type="button">Clear all markers</button>
+        </form>
         <button id="reset-view" type="button">Reset view</button>
       </div>
       <p id="status" aria-live="polite">Loading map data...</p>

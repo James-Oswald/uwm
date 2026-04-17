@@ -131,6 +131,41 @@ body {
   background: #243243;
 }
 
+.custom-coordinate-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.custom-coordinate-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #17202a;
+  border: 1px solid #2b3948;
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.55rem;
+}
+
+.custom-coordinate-control span {
+  color: #c9d7e4;
+  font-weight: 600;
+}
+
+.custom-coordinate-control input {
+  min-width: 11rem;
+  border: 1px solid #38485a;
+  border-radius: 0.35rem;
+  background: #0f151c;
+  color: inherit;
+  padding: 0.28rem 0.45rem;
+}
+
+.custom-coordinate-control input::placeholder {
+  color: #73879a;
+}
+
 #status {
   margin: 0.45rem 0 0;
   color: #9db0c2;
@@ -694,6 +729,21 @@ body {
   .quest-select-control {
     width: 100%;
     min-width: 0;
+  }
+
+  .custom-coordinate-form {
+    width: 100%;
+  }
+
+  .custom-coordinate-control {
+    width: 100%;
+    box-sizing: border-box;
+    justify-content: space-between;
+  }
+
+  .custom-coordinate-control input {
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .select-control select {
