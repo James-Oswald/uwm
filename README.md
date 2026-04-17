@@ -1,4 +1,4 @@
-# Unofficial Wynncraft Map (Client-Only)
+# Unofficial Wynncraft Map
 
 A fully client-side TypeScript web app that:
 

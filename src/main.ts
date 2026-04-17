@@ -1360,7 +1360,7 @@ function getScaleToFitViewport(): number {
 function resetView(): void {
   scale = getScaleToFitViewport();
   minScale = scale * 0.4;
-  maxScale = scale * 10;
+  maxScale = scale * 20;
   offsetX = (viewportWidth - MAP_IMAGE_CONTENT_BOX.width * scale) / 2 - MAP_IMAGE_CONTENT_BOX.left * scale;
   offsetY = (viewportHeight - MAP_IMAGE_CONTENT_BOX.height * scale) / 2 - MAP_IMAGE_CONTENT_BOX.top * scale;
   draw();
