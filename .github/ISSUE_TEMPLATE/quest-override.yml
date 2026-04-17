@@ -1,6 +1,6 @@
-name: Quest override / fix request
+name: Quest Change Request
 description: Request a manual quest removal, addition, or replacement in the cache build.
-title: "Override [Quest]: "
+title: "Quest Change: [Quest Name]"
 labels:
   - cache-override
   - quest-override
@@ -37,14 +37,14 @@ body:
     id: quests_to_add
     attributes:
       label: Quests to add
-      description: JSON array of quests to add. Each quest should include `title` and a `points` array with 2D `x` and `y` map coordinates. Point `label` is optional.
+      description: JSON array of quests to add. Each quest should include `title` and a `points` array with world `x` and `z` coordinates. Point `label` is optional.
       value: |
         [
           {
             "title": "Example Quest",
             "points": [
-              { "label": "Stage 1", "x": 100, "y": 200 },
-              { "label": "Stage 2", "x": 120, "y": 240 }
+              { "label": "Stage 1", "x": 100, "z": 200 },
+              { "label": "Stage 2", "x": 120, "z": 240 }
             ]
           }
         ]

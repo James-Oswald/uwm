@@ -1,6 +1,6 @@
-name: Marker override request
+name: Marker [Add/Remove/Change] Request
 description: Request a manual marker removal, addition, or replacement in the cache build.
-title: "[Override][Marker]: "
+title: "Marker [Add/Remove/Change]: [Marker Name]"
 labels:
   - cache-override
   - marker-override
@@ -28,7 +28,7 @@ body:
         [
           {
             "x": 123,
-            "y": -456
+            "z": -456
           }
         ]
       render: json
@@ -39,14 +39,14 @@ body:
     attributes:
       label: Markers to add
       description: |
-        JSON array of markers to add. Each marker should include `name`, `x`, `y`, and `icon`.
+        JSON array of markers to add. Each marker should include `name`, `x`, `z`, and `icon`.
         Use one of the supported map category keys for `icon`:
         - `quest`: Quests
         - `location`: Locations
         - `bank`: Banks
         - `travel-fast`: Fast Travel
         - `travel-seaskipper`: Sea Skipper
-        - `travel-balloon`: Housing Balloon
+        - `housing-ballon`: Housing Ballon
         - `blacksmith`: Blacksmiths
         - `potion`: Potions
         - `scroll-merchant`: Scroll Merchants
@@ -64,7 +64,7 @@ body:
             "name": "Example Marker",
             "icon": "travel-seaskipper",
             "x": 124,
-            "y": -456
+            "z": -456
           }
         ]
       render: json
